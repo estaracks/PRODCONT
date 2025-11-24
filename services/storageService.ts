@@ -125,6 +125,7 @@ export const loginUser = (employeeNumber: string, accessKey: string): boolean =>
     // Case insensitive check for username
     const user = employees.find(e => e.employeeNumber.toUpperCase() === employeeNumber.toUpperCase());
     
+    // Strict password check
     if (user && user.accessKey === accessKey && user.active) {
         localStorage.setItem(KEYS.CURRENT_USER_ID, user.id);
         return true;
@@ -163,43 +164,24 @@ export const fetchDesignData = async (designId: string): Promise<DesignData> => 
 export const seedDatabase = () => {
     const employees = getEmployees();
     
-    // Check if the specific Developer Admin exists. If not, we assume DB is stale or empty.
-    const devExists = employees.find(e => e.id === 'dev-main-01');
+    // Check if Superackito exists
+    const superExists = employees.find(e => e.employeeNumber === 'Superackito');
     
-    // Check if we still have old roles like 'Supervisor' or 'Operador'
-    // We cast to string to check legacy values that might not be in the Enum anymore
-    const hasLegacyRoles = employees.some(e => {
-        const r = e.role as string;
-        return r === 'Supervisor' || r === 'Operador' || r === 'Operator';
-    });
-
-    if (!devExists || hasLegacyRoles || employees.length === 0) {
+    if (!superExists || employees.length === 0) {
         console.log("Reinicializando base de datos de usuarios...");
         
         const initialUsers: Employee[] = [
             {
-                id: 'dev-main-01',
-                employeeNumber: 'DEV-ADMIN',
-                fullName: 'Desarrollador (Superadmin)',
+                id: 'super-dev-001',
+                employeeNumber: 'Superackito',
+                fullName: 'Superackito Dev',
                 role: EmployeeRole.DEVELOPER,
                 shift: 'Morning',
                 joinDate: '2023-01-01',
                 active: true,
                 skills: [],
                 certifications: [],
-                accessKey: 'ROOT-SUDO'
-            },
-            {
-                id: 'dir-main-01',
-                employeeNumber: 'DIR-001',
-                fullName: 'Director General',
-                role: EmployeeRole.DIRECTOR,
-                shift: 'Morning',
-                joinDate: '2023-01-01',
-                active: true,
-                skills: [],
-                certifications: [],
-                accessKey: 'DIR-777'
+                accessKey: 'Rackito100'
             },
             {
                 id: 'prod-main-01',
@@ -226,19 +208,21 @@ export const seedDatabase = () => {
                 accessKey: 'CAL-456'
             },
             {
-                id: 'asst-main-01',
-                employeeNumber: 'AST-001',
-                fullName: 'Asistente Dirección',
-                role: EmployeeRole.ASSISTANT,
+                id: 'dir-main-01',
+                employeeNumber: 'DIR-001',
+                fullName: 'Director General',
+                role: EmployeeRole.DIRECTOR,
                 shift: 'Morning',
-                joinDate: '2023-04-01',
+                joinDate: '2023-01-01',
                 active: true,
                 skills: [],
                 certifications: [],
-                accessKey: 'AST-999'
+                accessKey: 'DIR-777'
             }
         ];
 
+        // Merge existing with new to not lose data if desired, or overwrite. 
+        // For this request, we overwrite if critical users are missing to ensure app works.
         setData(KEYS.EMPLOYEES, initialUsers);
     }
 };

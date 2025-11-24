@@ -24,11 +24,11 @@ const Login = () => {
         <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4">
             
             <div className="mb-8 text-center animate-fade-in-down">
-                <div className="bg-blue-600 p-4 rounded-2xl inline-block mb-4 shadow-lg shadow-blue-500/20">
+                <div className="bg-orange-500 p-4 rounded-2xl inline-block mb-4 shadow-lg shadow-orange-500/20">
                     <Factory size={48} className="text-white" />
                 </div>
-                <h1 className="text-3xl font-bold text-white tracking-tight">ProControl Industrial</h1>
-                <p className="text-slate-400 mt-2">Sistema Integral de Gestión de Planta</p>
+                <h1 className="text-3xl font-bold text-white tracking-tight">Estaracks</h1>
+                <p className="text-slate-400 mt-2 font-medium tracking-wide">CONTROL DE PRODUCCIÓN</p>
             </div>
 
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
@@ -45,14 +45,14 @@ const Login = () => {
 
                     <form onSubmit={handleLogin} className="space-y-5">
                         <div>
-                            <label className="block text-sm font-semibold text-slate-600 mb-1">Número de Empleado</label>
+                            <label className="block text-sm font-semibold text-slate-600 mb-1">Usuario</label>
                             <div className="relative">
                                 <User className="absolute left-3 top-3 text-slate-400" size={18} />
                                 <input 
                                     type="text" 
                                     required
-                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                                    placeholder="Ej. DEV-ADMIN"
+                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
+                                    placeholder="ID de Empleado"
                                     value={empId}
                                     onChange={e => setEmpId(e.target.value)}
                                 />
@@ -60,13 +60,13 @@ const Login = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-semibold text-slate-600 mb-1">Contraseña / Llave de Acceso</label>
+                            <label className="block text-sm font-semibold text-slate-600 mb-1">Contraseña</label>
                             <div className="relative">
                                 <Lock className="absolute left-3 top-3 text-slate-400" size={18} />
                                 <input 
                                     type="password" 
                                     required
-                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium"
                                     placeholder="••••••••"
                                     value={password}
                                     onChange={e => setPassword(e.target.value)}
@@ -76,36 +76,30 @@ const Login = () => {
 
                         <button 
                             type="submit" 
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
                         >
-                            Ingresar al Sistema <ChevronRight size={18} />
+                            Ingresar <ChevronRight size={18} />
                         </button>
                     </form>
                 </div>
                 
                 <div className="bg-slate-50 p-6 border-t border-slate-100">
-                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Credenciales Demo:</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Accesos Rápidos</p>
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="p-2 bg-white border rounded">
-                            <span className="block font-bold text-slate-700">Desarrollador</span>
-                            <span className="text-slate-500">User: DEV-ADMIN</span><br/>
-                            <span className="text-slate-500">Pass: ROOT-SUDO</span>
+                        <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-blue-400 cursor-pointer transition-colors" onClick={() => { setEmpId('Superackito'); setPassword('Rackito100'); }}>
+                            <span className="block font-bold text-slate-800 mb-1">Superackito</span>
+                            <span className="text-slate-500 font-mono">Pass: Rackito100</span>
                         </div>
-                        <div className="p-2 bg-white border rounded">
-                            <span className="block font-bold text-slate-700">Director</span>
-                            <span className="text-slate-500">User: DIR-001</span><br/>
-                            <span className="text-slate-500">Pass: DIR-777</span>
-                        </div>
-                        <div className="p-2 bg-white border rounded col-span-2">
-                             <span className="block font-bold text-slate-700">Jefe Producción</span>
-                            <span className="text-slate-500">User: PROD-001</span> | <span className="text-slate-500">Pass: PROD-123</span>
+                        <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-blue-400 cursor-pointer transition-colors" onClick={() => { setEmpId('PROD-001'); setPassword('PROD-123'); }}>
+                            <span className="block font-bold text-slate-800 mb-1">Producción</span>
+                            <span className="text-slate-500 font-mono">Pass: PROD-123</span>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <p className="mt-8 text-slate-500 text-xs text-center">
-                © 2024 ProControl Industrial. Acceso restringido a personal autorizado.
+            <p className="mt-8 text-slate-500 text-xs text-center font-medium">
+                © 2025 Estaracks. Sistema Interno v2.0
             </p>
         </div>
     );
