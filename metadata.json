@@ -1,0 +1,7 @@
+{
+  "name": "ProControl Industrial",
+  "description": "Sistema integral de control de producción, personal y bitácoras para entornos industriales.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
