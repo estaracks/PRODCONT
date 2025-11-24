@@ -9,7 +9,8 @@ import {
 } from '../types';
 import { 
     Plus, Search, RefreshCw, ChevronLeft, 
-    ChevronRight, Image as ImageIcon, File as FileIcon, Trash2, X, Printer, CheckSquare
+    ChevronRight, Image as ImageIcon, File as FileIcon, Trash2, X, Printer, CheckSquare,
+    LayoutGrid, List, Calendar, User
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 10;
@@ -19,6 +20,9 @@ const ProductionOrders = () => {
     const [orders, setOrders] = useState<ProductionOrder[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [loading, setLoading] = useState(false);
+    
+    // View Mode
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     
     // Filters
     const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -120,6 +124,23 @@ const ProductionOrders = () => {
         setSortConfig({ key, direction });
     };
 
+    const handleStatusChange = (orderId: string, newStatus: OrderStatus) => {
+        const updatedOrders = orders.map(o => {
+            if (o.id === orderId) {
+                return { ...o, status: newStatus };
+            }
+            return o;
+        });
+        setOrders(updatedOrders);
+        const orderToUpdate = updatedOrders.find(o => o.id === orderId);
+        if (orderToUpdate) saveOrder(orderToUpdate);
+        
+        // Also update selectedOrder if it's the one being modified
+        if (selectedOrder && selectedOrder.id === orderId) {
+            setSelectedOrder({ ...selectedOrder, status: newStatus });
+        }
+    };
+
     const handleAddArticle = () => {
         if (!artName || artQty <= 0) return;
         const newArt: ProductionArticle = {
@@ -206,6 +227,12 @@ const ProductionOrders = () => {
         return emp ? emp.fullName : 'No Asignado';
     };
 
+    const calculateProgress = (order: ProductionOrder) => {
+        if (!order.processes || order.processes.length === 0) return 0;
+        const completed = order.processes.filter(p => p.status === ProcessStatus.COMPLETED).length;
+        return Math.round((completed / order.processes.length) * 100);
+    };
+
     const handleProcessUpdate = (orderId: string, processId: string, newStatus: ProcessStatus) => {
         const updatedOrders = orders.map(o => {
             if (o.id === orderId) {
@@ -223,10 +250,22 @@ const ProductionOrders = () => {
         });
         setOrders(updatedOrders);
         updatedOrders.forEach(o => saveOrder(o));
-        // Update selected order if open
         if(selectedOrder) {
              const fresh = updatedOrders.find(o => o.id === selectedOrder.id);
              if(fresh) setSelectedOrder(fresh);
+        }
+    };
+
+    // --- Render Helpers ---
+
+    const getStatusColor = (status: OrderStatus) => {
+        switch (status) {
+            case OrderStatus.COMPLETED: return 'bg-green-100 text-green-700 border-green-200';
+            case OrderStatus.IN_PROGRESS: return 'bg-blue-100 text-blue-700 border-blue-200';
+            case OrderStatus.PENDING: return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+            case OrderStatus.PAUSED: return 'bg-orange-100 text-orange-700 border-orange-200';
+            case OrderStatus.CANCELED: return 'bg-red-50 text-red-600 border-red-200';
+            default: return 'bg-slate-100 text-slate-600 border-slate-200';
         }
     };
 
@@ -241,19 +280,29 @@ const ProductionOrders = () => {
                     <h2 className="text-2xl font-bold text-slate-800">Panel de Producción</h2>
                     <p className="text-slate-500 text-sm">Gestión centralizada de órdenes</p>
                 </div>
-                <div className="flex gap-2 w-full md:w-auto">
+                <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
+                    {/* View Toggle */}
+                    <div className="hidden md:flex bg-slate-100 p-1 rounded-lg border border-slate-200 mr-2">
+                        <button onClick={() => setViewMode('grid')} className={`p-2 rounded-md transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`} title="Vista Tarjetas">
+                            <LayoutGrid size={18} />
+                        </button>
+                        <button onClick={() => setViewMode('list')} className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`} title="Vista Lista">
+                            <List size={18} />
+                        </button>
+                    </div>
+
                     <button 
                         onClick={loadData} 
-                        className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg border bg-white shadow-sm transition-colors"
+                        className="p-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border bg-white shadow-sm transition-colors"
                         title="Actualizar"
                     >
                         <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
                     </button>
                     <button 
                         onClick={() => setIsModalOpen(true)}
-                        className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors flex-1 md:flex-none shadow-md font-medium"
+                        className="bg-blue-600 text-white px-4 py-2.5 rounded-lg flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors flex-1 md:flex-none shadow-md font-medium"
                     >
-                        <Plus size={18} /> Crear Orden
+                        <Plus size={18} /> <span className="hidden sm:inline">Crear Orden</span> <span className="sm:hidden">Crear</span>
                     </button>
                 </div>
             </div>
@@ -265,7 +314,7 @@ const ProductionOrders = () => {
                         <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
                         <input 
                             type="text" 
-                            placeholder="Buscar proyecto..." 
+                            placeholder="Buscar..." 
                             className="w-full pl-10 pr-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
@@ -294,7 +343,7 @@ const ProductionOrders = () => {
 
                     <input 
                         type="date" 
-                        className="w-full p-2 border rounded-lg text-sm"
+                        className="w-full p-2 border rounded-lg text-sm text-slate-600"
                         title="Fecha Recepción"
                         value={filterDateReceived}
                         onChange={e => setFilterDateReceived(e.target.value)}
@@ -302,7 +351,7 @@ const ProductionOrders = () => {
 
                     <input 
                         type="date" 
-                        className="w-full p-2 border rounded-lg text-sm"
+                        className="w-full p-2 border rounded-lg text-sm text-slate-600"
                         title="Fecha Entrega"
                         value={filterDateDue}
                         onChange={e => setFilterDateDue(e.target.value)}
@@ -311,61 +360,95 @@ const ProductionOrders = () => {
             </div>
 
             {/* Orders Data Container */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+            <div className={`flex-1 flex flex-col ${viewMode === 'list' ? 'bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden' : ''}`}>
                 
-                {/* 1. Mobile/Tablet Card View (md:hidden) */}
-                <div className="md:hidden p-4 space-y-4 overflow-y-auto flex-1">
-                    {currentData.map(order => (
-                        <div key={order.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-3">
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <span className="text-xs font-bold text-slate-400 uppercase">Folio</span>
-                                    <p className="text-lg font-bold text-blue-600 leading-tight">{order.orderNumber}</p>
-                                </div>
-                                <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${
-                                    order.status === OrderStatus.COMPLETED ? 'bg-green-100 text-green-700 border-green-200' :
-                                    order.status === OrderStatus.IN_PROGRESS ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                                    order.status === OrderStatus.PENDING ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                    'bg-slate-100 text-slate-600 border-slate-200'
-                                }`}>
-                                    {order.status}
-                                </span>
-                            </div>
-                            
-                            <div>
-                                <span className="text-xs font-bold text-slate-400 uppercase">Proyecto</span>
-                                <p className="font-medium text-slate-800 line-clamp-2">{order.projectName}</p>
-                                <p className="text-xs text-slate-500 mt-1">{order.client}</p>
-                            </div>
+                {/* GRID VIEW (Cards) - Visible on Mobile and when ViewMode is Grid */}
+                {(viewMode === 'grid' || window.innerWidth < 768) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
+                        {currentData.map(order => {
+                            const progress = calculateProgress(order);
+                            return (
+                                <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow flex flex-col overflow-hidden">
+                                    {/* Card Header */}
+                                    <div className="p-4 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
+                                        <div>
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Folio</span>
+                                            <p className="text-lg font-bold text-blue-600 leading-none mt-0.5">{order.orderNumber}</p>
+                                        </div>
+                                        {/* Editable Status Badge */}
+                                        <div className="relative">
+                                            <select 
+                                                value={order.status}
+                                                onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
+                                                className={`appearance-none cursor-pointer pl-3 pr-8 py-1.5 rounded-full text-xs font-bold border outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 transition-all ${getStatusColor(order.status)}`}
+                                            >
+                                                {Object.values(OrderStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                                <svg className="fill-current h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                            <div className="grid grid-cols-2 gap-2 text-sm mt-1">
-                                <div className="bg-slate-50 p-2 rounded border border-slate-100">
-                                    <span className="block text-xs text-slate-400">Entrega</span>
-                                    <span className="font-semibold text-slate-700">{order.dueDate}</span>
+                                    {/* Card Body */}
+                                    <div className="p-4 flex-1 flex flex-col gap-3">
+                                        <div>
+                                            <h3 className="font-bold text-slate-800 line-clamp-2" title={order.projectName}>{order.projectName}</h3>
+                                            <p className="text-xs text-slate-500 mt-0.5">{order.client}</p>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-2 mt-auto pt-2">
+                                            <div className="flex items-center gap-2 text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                                <Calendar size={14} className="text-slate-400" />
+                                                <div>
+                                                    <span className="block text-[10px] text-slate-400 uppercase font-bold">Entrega</span>
+                                                    <span className="text-xs font-semibold">{order.dueDate}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                                <User size={14} className="text-slate-400" />
+                                                <div className="overflow-hidden">
+                                                    <span className="block text-[10px] text-slate-400 uppercase font-bold">Encargado</span>
+                                                    <span className="text-xs font-semibold truncate block" title={getManagerName(order.managerId)}>
+                                                        {getManagerName(order.managerId).split(' ')[0]}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Card Footer: Progress & Action */}
+                                    <div className="px-4 pb-4">
+                                        <div className="mb-3">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase">Progreso</span>
+                                                <span className="text-[10px] font-bold text-slate-600">{progress}%</span>
+                                            </div>
+                                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                                            </div>
+                                        </div>
+
+                                        <button 
+                                            onClick={() => setSelectedOrder(order)}
+                                            className="w-full bg-white text-blue-600 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors text-sm border border-blue-200 shadow-sm"
+                                        >
+                                            Ver Detalles
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="bg-slate-50 p-2 rounded border border-slate-100">
-                                    <span className="block text-xs text-slate-400">Encargado</span>
-                                    <span className="font-semibold text-slate-700 truncate">{getManagerName(order.managerId).split(' ')[0]}</span>
-                                </div>
+                            );
+                        })}
+                        {currentData.length === 0 && (
+                            <div className="col-span-full text-center p-12 bg-white rounded-xl border border-dashed border-slate-300">
+                                <p className="text-slate-400">No se encontraron órdenes con los filtros actuales.</p>
                             </div>
+                        )}
+                    </div>
+                )}
 
-                            <button 
-                                onClick={() => setSelectedOrder(order)}
-                                className="w-full mt-2 bg-blue-50 text-blue-600 py-2.5 rounded-lg font-medium hover:bg-blue-100 transition-colors text-sm border border-blue-100"
-                            >
-                                Ver Detalle Completo
-                            </button>
-                        </div>
-                    ))}
-                    {currentData.length === 0 && (
-                        <div className="text-center p-8 bg-slate-50 rounded-lg border border-dashed text-slate-400">
-                            No se encontraron órdenes con los filtros actuales.
-                        </div>
-                    )}
-                </div>
-
-                {/* 2. Desktop Table View (hidden md:block) */}
-                <div className="hidden md:block overflow-x-auto flex-1">
+                {/* LIST VIEW (Table) - Hidden on Mobile, Visible on Desktop if viewMode is List */}
+                <div className={`hidden md:block overflow-x-auto flex-1 ${viewMode !== 'list' ? 'hidden' : ''}`}>
                     <table className="w-full text-left">
                         <thead className="bg-slate-50 border-b border-slate-200">
                             <tr>
@@ -390,14 +473,14 @@ const ProductionOrders = () => {
                                     <td className="p-4 text-sm text-slate-600 hidden xl:table-cell">{order.receptionDate || '-'}</td>
                                     <td className="p-4 text-sm text-slate-600 hidden md:table-cell">{order.dueDate}</td>
                                     <td className="p-4 text-center">
-                                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${
-                                            order.status === OrderStatus.COMPLETED ? 'bg-green-100 text-green-700 border-green-200' :
-                                            order.status === OrderStatus.IN_PROGRESS ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                                            order.status === OrderStatus.PENDING ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                                            'bg-slate-100 text-slate-600 border-slate-200'
-                                        }`}>
-                                            {order.status}
-                                        </span>
+                                        {/* Editable Status in Table too */}
+                                        <select 
+                                            value={order.status}
+                                            onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
+                                            className={`appearance-none cursor-pointer px-3 py-1 rounded-full text-xs font-bold border outline-none focus:ring-1 focus:ring-blue-500 transition-all ${getStatusColor(order.status)}`}
+                                        >
+                                            {Object.values(OrderStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                                        </select>
                                     </td>
                                     <td className="p-4 text-right">
                                         <button 
@@ -421,7 +504,7 @@ const ProductionOrders = () => {
                 </div>
 
                 {/* Pagination (Shared) */}
-                <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
+                <div className={`p-4 flex items-center justify-between ${viewMode === 'list' ? 'bg-slate-50 border-t border-slate-100' : 'mt-auto pt-6'}`}>
                     <span className="text-sm text-slate-500 hidden sm:inline">
                         Mostrando {currentData.length} de {filteredOrders.length}
                     </span>
@@ -429,15 +512,15 @@ const ProductionOrders = () => {
                         <button 
                             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                             disabled={currentPage === 1}
-                            className="p-2 border rounded hover:bg-white disabled:opacity-50"
+                            className="p-2 border rounded bg-white hover:bg-slate-50 disabled:opacity-50 shadow-sm"
                         >
                             <ChevronLeft size={16} />
                         </button>
-                        <span className="px-3 py-2 text-sm font-medium text-slate-700">Página {currentPage}</span>
+                        <span className="px-3 py-2 text-sm font-medium text-slate-700 bg-white border rounded shadow-sm">Página {currentPage}</span>
                         <button 
                             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                             disabled={currentPage === totalPages || totalPages === 0}
-                            className="p-2 border rounded hover:bg-white disabled:opacity-50"
+                            className="p-2 border rounded bg-white hover:bg-slate-50 disabled:opacity-50 shadow-sm"
                         >
                             <ChevronRight size={16} />
                         </button>
@@ -664,7 +747,13 @@ const ProductionOrders = () => {
                                 </div>
                                 <div className="p-3 bg-slate-50 rounded border">
                                     <span className="text-xs text-slate-400 uppercase font-bold">Estado</span>
-                                    <p className="font-semibold">{selectedOrder.status}</p>
+                                    <select 
+                                        value={selectedOrder.status}
+                                        onChange={(e) => handleStatusChange(selectedOrder.id, e.target.value as OrderStatus)}
+                                        className="font-semibold bg-transparent outline-none cursor-pointer text-blue-700 w-full"
+                                    >
+                                        {Object.values(OrderStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                                    </select>
                                 </div>
                             </div>
 

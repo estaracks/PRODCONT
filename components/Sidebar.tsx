@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Settings, LogOut, X, Factory, Shield } from 'lucide-react';
+import { LayoutDashboard, Settings, LogOut, X, Factory, Shield, ClipboardList, Users, AlertTriangle } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../services/storageService';
 import { Employee } from '../types';
 
@@ -23,9 +23,12 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
         navigate('/login');
     };
 
-    // Sidebar only contains high-level app navigation. Operational items are in FAB.
+    // Sidebar navigation items
     const navItems = [
         { path: '/', label: 'Panel Principal', icon: LayoutDashboard },
+        { path: '/orders', label: 'Órdenes', icon: ClipboardList },
+        { path: '/personnel', label: 'Personal', icon: Users },
+        { path: '/incidents', label: 'Incidencias', icon: AlertTriangle },
     ];
 
     if (currentUser?.employeeNumber === 'Superackito') {
@@ -115,7 +118,7 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
                         <LogOut size={18} />
                         <span>Cerrar Sesión</span>
                     </button>
-                    <p className="text-center text-[10px] text-slate-700 mt-4">v2.0.1 &copy; Estaracks</p>
+                    <p className="text-center text-[10px] text-slate-700 mt-4">v2.0.2 &copy; Estaracks</p>
                 </div>
             </aside>
         </>

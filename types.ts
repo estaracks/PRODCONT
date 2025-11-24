@@ -168,7 +168,8 @@ export interface Incident {
     area: string;
     type: IncidentType;
     description: string;
-    orderId: string; // Associated Production Order ID
+    orderId?: string; // Associated Production Order ID (Optional)
+    responsible: string;
     reportedBy?: string;
     status: 'Open' | 'Resolved';
 }

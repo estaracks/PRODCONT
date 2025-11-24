@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { getIncidents, saveIncident, getOrders } from '../services/storageService';
 import { Incident, IncidentType, ProductionOrder, ProcessType } from '../types';
@@ -17,6 +18,7 @@ const IncidentsPage = () => {
     const [type, setType] = useState<IncidentType>(IncidentType.OTHER);
     const [description, setDescription] = useState('');
     const [orderId, setOrderId] = useState('');
+    const [responsible, setResponsible] = useState('');
     const [successMsg, setSuccessMsg] = useState('');
 
     useEffect(() => {
@@ -32,7 +34,8 @@ const IncidentsPage = () => {
         setLoading(false);
     };
 
-    const getOrderName = (id: string) => {
+    const getOrderName = (id?: string) => {
+        if (!id) return 'General / Sin Orden';
         const order = orders.find(o => o.id === id);
         return order ? `${order.orderNumber} - ${order.projectName}` : 'N/A';
     };
@@ -40,27 +43,24 @@ const IncidentsPage = () => {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (!orderId) {
-            alert("Debes seleccionar una orden asociada.");
-            return;
-        }
-
         const newIncident: Incident = {
             id: crypto.randomUUID(),
-            date: date, // User confirmed date
+            date: date,
             area,
             type,
             description,
-            orderId,
+            orderId: orderId || undefined,
+            responsible,
             status: 'Open'
         };
 
         saveIncident(newIncident);
         setSuccessMsg('Incidencia registrada correctamente');
         
-        // Reset form but keep date active
+        // Reset form
         setDescription('');
         setOrderId('');
+        setResponsible('');
         
         setTimeout(() => {
             setSuccessMsg('');
@@ -136,7 +136,6 @@ const IncidentsPage = () => {
                                             value={date}
                                             onChange={e => setDate(e.target.value)}
                                         />
-                                        <p className="text-xs text-slate-400 mt-1">Por defecto: fecha actual</p>
                                     </div>
 
                                     {/* Tipo */}
@@ -169,23 +168,33 @@ const IncidentsPage = () => {
                                         </select>
                                     </div>
 
+                                    {/* Responsable */}
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Responsable</label>
+                                        <input 
+                                            required 
+                                            className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none"
+                                            value={responsible}
+                                            onChange={e => setResponsible(e.target.value)}
+                                            placeholder="Nombre del responsable"
+                                        />
+                                    </div>
+
                                     {/* Orden Asociada */}
                                     <div>
-                                        <label className="block text-sm font-bold text-slate-700 mb-2">Orden Asociada</label>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Orden Asociada (Opcional)</label>
                                         <select 
-                                            required
                                             className="w-full border border-slate-300 rounded-lg p-2.5 bg-white"
                                             value={orderId}
                                             onChange={e => setOrderId(e.target.value)}
                                         >
-                                            <option value="">Seleccionar Orden...</option>
+                                            <option value="">General / Ninguna</option>
                                             {orders.map(o => (
                                                 <option key={o.id} value={o.id}>
                                                     {o.orderNumber} - {o.projectName}
                                                 </option>
                                             ))}
                                         </select>
-                                        {orders.length === 0 && <p className="text-xs text-red-400 mt-1">No hay órdenes activas.</p>}
                                     </div>
                                 </div>
 
@@ -229,7 +238,8 @@ const IncidentsPage = () => {
                                     <th className="p-4 font-semibold text-slate-600 text-sm">Fecha</th>
                                     <th className="p-4 font-semibold text-slate-600 text-sm">Tipo</th>
                                     <th className="p-4 font-semibold text-slate-600 text-sm hidden md:table-cell">Área</th>
-                                    <th className="p-4 font-semibold text-slate-600 text-sm hidden lg:table-cell">Orden Asociada</th>
+                                    <th className="p-4 font-semibold text-slate-600 text-sm">Responsable</th>
+                                    <th className="p-4 font-semibold text-slate-600 text-sm hidden lg:table-cell">Orden</th>
                                     <th className="p-4 font-semibold text-slate-600 text-sm">Descripción</th>
                                     <th className="p-4 font-semibold text-slate-600 text-sm text-center hidden sm:table-cell">Estado</th>
                                 </tr>
@@ -248,7 +258,10 @@ const IncidentsPage = () => {
                                             </span>
                                         </td>
                                         <td className="p-4 text-sm text-slate-600 hidden md:table-cell">{inc.area}</td>
-                                        <td className="p-4 text-sm text-blue-600 font-medium hidden lg:table-cell">{getOrderName(inc.orderId)}</td>
+                                        <td className="p-4 text-sm text-slate-700 font-medium">{inc.responsible || '-'}</td>
+                                        <td className="p-4 text-sm text-blue-600 font-medium hidden lg:table-cell">
+                                            {inc.orderId ? getOrderName(inc.orderId) : <span className="text-slate-400">General</span>}
+                                        </td>
                                         <td className="p-4 text-sm text-slate-600 max-w-xs truncate" title={inc.description}>
                                             {inc.description}
                                         </td>
@@ -261,7 +274,7 @@ const IncidentsPage = () => {
                                 ))}
                                 {incidents.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="p-8 text-center text-slate-400 italic">
+                                        <td colSpan={7} className="p-8 text-center text-slate-400 italic">
                                             No hay incidencias registradas.
                                         </td>
                                     </tr>
