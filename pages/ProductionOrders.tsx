@@ -250,23 +250,32 @@ const ProductionOrders = () => {
     const handleCloudSync = async () => {
         setSyncing(true);
         try {
+            console.log("Iniciando sincronización con Firebase Cloud...");
             const remoteOrders = await fetchPendingOrdersFromCloud();
+            console.log("Órdenes recuperadas:", remoteOrders);
+            
             let count = 0;
             remoteOrders.forEach(json => {
-                const order = mapJsonToOrder(json);
-                if (order) {
-                    saveOrder(order);
-                    count++;
+                // Verificar si ya existe para no duplicar (opcional, pero buena práctica)
+                const exists = orders.some(o => o.orderNumber === json.external_id);
+                if (!exists) {
+                    const order = mapJsonToOrder(json);
+                    if (order) {
+                        saveOrder(order);
+                        count++;
+                    }
                 }
             });
+            
             if (count > 0) {
                 await loadData();
-                alert(`Se sincronizaron ${count} nuevas órdenes desde la nube.`);
+                alert(`Éxito: Se sincronizaron ${count} nuevas órdenes desde la nube.`);
             } else {
-                alert('No hay órdenes nuevas en la nube.');
+                alert('Sincronización completa: No se encontraron órdenes nuevas en la nube.');
             }
         } catch (error) {
-            alert('Error al sincronizar. Verifique su conexión.');
+            console.error("Sync Error Details:", error);
+            alert('Error al conectar con la nube. Revise la consola para más detalles y asegúrese de tener internet y permisos de Firebase configurados.');
         } finally {
             setSyncing(false);
         }
@@ -275,6 +284,7 @@ const ProductionOrders = () => {
     const mapJsonToOrder = (data: any): ProductionOrder | null => {
         // Validate minimal fields from Fabrimueble JSON
         if (!data.external_id || !data.items) {
+             console.warn("JSON inválido o incompleto:", data);
              return null;
         }
 
