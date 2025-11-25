@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     getOrders, saveOrder, createInitialOrder, getEmployees
 } from '../services/storageService';
@@ -10,7 +10,7 @@ import {
 import { 
     Plus, Search, RefreshCw, ChevronLeft, 
     ChevronRight, Image as ImageIcon, File as FileIcon, Trash2, X, Printer, CheckSquare,
-    LayoutGrid, List, Calendar, User
+    LayoutGrid, List, Calendar, User, Upload
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 10;
@@ -38,6 +38,9 @@ const ProductionOrders = () => {
     // Modal & Form State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<ProductionOrder | null>(null);
+
+    // File Import
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // New Order Form
     const [newProjectName, setNewProjectName] = useState('');
@@ -212,6 +215,88 @@ const ProductionOrders = () => {
         resetForm();
     };
 
+    // --- JSON Import Logic ---
+
+    const handleImportClick = () => {
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+            fileInputRef.current.click();
+        }
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const json = JSON.parse(event.target?.result as string);
+                processImportedOrder(json);
+            } catch (err) {
+                console.error(err);
+                alert('Error al procesar el archivo JSON. Asegúrate de que sea una exportación válida de Fabrimueble.');
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    const processImportedOrder = (data: any) => {
+        // Validate minimal fields from Fabrimueble JSON
+        if (!data.external_id || !data.items) {
+             alert('El archivo no tiene el formato correcto (faltan ID o items).');
+             return;
+        }
+
+        // Map data
+        const importedOrder: ProductionOrder = {
+            id: crypto.randomUUID(),
+            orderNumber: data.external_id,
+            projectName: data.project_name || 'Proyecto Importado',
+            client: data.client || 'Cliente Externo',
+            
+            receptionDate: data.export_date ? new Date(data.export_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            dueDate: data.deadline ? new Date(data.deadline).toISOString().split('T')[0] : '', // deadline is timestamp
+            managerId: '', // Requires manual assignment
+            
+            status: OrderStatus.PENDING,
+            priority: 'Medium',
+            designId: 'EXT-IMPORT',
+            designVersion: '1.0',
+            
+            createdAt: new Date().toISOString(),
+            evidenceLogs: [],
+            materials: [],
+            processes: PROCESS_FLOW_DEFAULT.map((type) => ({
+                id: crypto.randomUUID(),
+                type: type,
+                status: ProcessStatus.PENDING,
+                pausedTimeTotal: 0,
+                notes: ''
+            })),
+            
+            articles: data.items.map((item: any) => {
+                const dims = item.dims_mm 
+                    ? `(${item.dims_mm.h}x${item.dims_mm.w}x${item.dims_mm.d}mm)` 
+                    : '';
+                const bomCount = item.components_bom ? item.components_bom.length : 0;
+                
+                return {
+                    id: crypto.randomUUID(),
+                    name: item.sku_name || 'Artículo Desconocido',
+                    quantity: item.quantity || 1,
+                    description: `${item.category || ''} ${dims}. BOM: ${bomCount} componentes.`,
+                    photos: [],
+                    pdfs: []
+                };
+            })
+        };
+
+        saveOrder(importedOrder);
+        loadData();
+        alert(`Orden ${importedOrder.orderNumber} importada exitosamente desde Fabrimueble.`);
+    };
+
     const resetForm = () => {
         setNewProjectName('');
         setNewReceptionDate('');
@@ -273,6 +358,14 @@ const ProductionOrders = () => {
 
     return (
         <div className="p-4 md:p-6 h-full flex flex-col pb-24">
+            {/* Hidden Input for Import */}
+            <input 
+                type="file" 
+                ref={fileInputRef} 
+                style={{ display: 'none' }} 
+                accept=".json" 
+                onChange={handleFileChange} 
+            />
             
             {/* Header & Actions */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -290,6 +383,14 @@ const ProductionOrders = () => {
                             <List size={18} />
                         </button>
                     </div>
+
+                    <button 
+                        onClick={handleImportClick}
+                        className="p-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border bg-white shadow-sm transition-colors flex items-center gap-2"
+                        title="Importar JSON de Fabrimueble"
+                    >
+                        <Upload size={20} /> <span className="hidden lg:inline text-sm font-medium">Importar</span>
+                    </button>
 
                     <button 
                         onClick={loadData} 
@@ -402,7 +503,7 @@ const ProductionOrders = () => {
                                                 <Calendar size={14} className="text-slate-400" />
                                                 <div>
                                                     <span className="block text-[10px] text-slate-400 uppercase font-bold">Entrega</span>
-                                                    <span className="text-xs font-semibold">{order.dueDate}</span>
+                                                    <span className="text-xs font-semibold">{order.dueDate || 'N/A'}</span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2 text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
