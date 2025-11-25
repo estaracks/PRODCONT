@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-    getOrders, saveOrder, createInitialOrder, getEmployees
+    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud
 } from '../services/storageService';
 import { printOrder } from '../services/pdfService';
 import { 
@@ -10,7 +10,7 @@ import {
 import { 
     Plus, Search, RefreshCw, ChevronLeft, 
     ChevronRight, Image as ImageIcon, File as FileIcon, Trash2, X, Printer, CheckSquare,
-    LayoutGrid, List, Calendar, User, Upload
+    LayoutGrid, List, Calendar, User, Upload, Download
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 10;
@@ -20,6 +20,7 @@ const ProductionOrders = () => {
     const [orders, setOrders] = useState<ProductionOrder[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [loading, setLoading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
     
     // View Mode
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -215,7 +216,7 @@ const ProductionOrders = () => {
         resetForm();
     };
 
-    // --- JSON Import Logic ---
+    // --- JSON Import & Sync Logic ---
 
     const handleImportClick = () => {
         if (fileInputRef.current) {
@@ -232,31 +233,59 @@ const ProductionOrders = () => {
         reader.onload = (event) => {
             try {
                 const json = JSON.parse(event.target?.result as string);
-                processImportedOrder(json);
+                const order = mapJsonToOrder(json);
+                if (order) {
+                    saveOrder(order);
+                    loadData();
+                    alert(`Orden ${order.orderNumber} importada exitosamente desde Archivo.`);
+                }
             } catch (err) {
                 console.error(err);
-                alert('Error al procesar el archivo JSON. Asegúrate de que sea una exportación válida de Fabrimueble.');
+                alert('Error al procesar el archivo JSON. Formato inválido.');
             }
         };
         reader.readAsText(file);
     };
 
-    const processImportedOrder = (data: any) => {
+    const handleCloudSync = async () => {
+        setSyncing(true);
+        try {
+            const remoteOrders = await fetchPendingOrdersFromCloud();
+            let count = 0;
+            remoteOrders.forEach(json => {
+                const order = mapJsonToOrder(json);
+                if (order) {
+                    saveOrder(order);
+                    count++;
+                }
+            });
+            if (count > 0) {
+                await loadData();
+                alert(`Se sincronizaron ${count} nuevas órdenes desde la nube.`);
+            } else {
+                alert('No hay órdenes nuevas en la nube.');
+            }
+        } catch (error) {
+            alert('Error al sincronizar. Verifique su conexión.');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const mapJsonToOrder = (data: any): ProductionOrder | null => {
         // Validate minimal fields from Fabrimueble JSON
         if (!data.external_id || !data.items) {
-             alert('El archivo no tiene el formato correcto (faltan ID o items).');
-             return;
+             return null;
         }
 
-        // Map data
-        const importedOrder: ProductionOrder = {
+        return {
             id: crypto.randomUUID(),
             orderNumber: data.external_id,
             projectName: data.project_name || 'Proyecto Importado',
             client: data.client || 'Cliente Externo',
             
             receptionDate: data.export_date ? new Date(data.export_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-            dueDate: data.deadline ? new Date(data.deadline).toISOString().split('T')[0] : '', // deadline is timestamp
+            dueDate: data.deadline ? new Date(data.deadline).toISOString().split('T')[0] : '', 
             managerId: '', // Requires manual assignment
             
             status: OrderStatus.PENDING,
@@ -291,10 +320,6 @@ const ProductionOrders = () => {
                 };
             })
         };
-
-        saveOrder(importedOrder);
-        loadData();
-        alert(`Orden ${importedOrder.orderNumber} importada exitosamente desde Fabrimueble.`);
     };
 
     const resetForm = () => {
@@ -385,9 +410,19 @@ const ProductionOrders = () => {
                     </div>
 
                     <button 
+                        onClick={handleCloudSync}
+                        disabled={syncing}
+                        className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-lg border border-blue-100 bg-white shadow-sm transition-colors flex items-center gap-2"
+                        title="Sincronizar desde Nube (API)"
+                    >
+                        <Download size={20} className={syncing ? 'animate-bounce' : ''} /> 
+                        <span className="hidden lg:inline text-sm font-medium">Sincronizar Nube</span>
+                    </button>
+
+                    <button 
                         onClick={handleImportClick}
                         className="p-2.5 text-slate-600 hover:bg-slate-100 rounded-lg border bg-white shadow-sm transition-colors flex items-center gap-2"
-                        title="Importar JSON de Fabrimueble"
+                        title="Importar JSON Local"
                     >
                         <Upload size={20} /> <span className="hidden lg:inline text-sm font-medium">Importar</span>
                     </button>
@@ -836,7 +871,7 @@ const ProductionOrders = () => {
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div className="p-3 bg-slate-50 rounded border">
                                     <span className="text-xs text-slate-400 uppercase font-bold">Recepción</span>
-                                    <p className="font-semibold">{selectedOrder.receptionDate || 'N/A'}</p>
+                                    <p className="font-semibold">{selectedOrder.receptionDate || 'N/A'} (Importado)</p>
                                 </div>
                                 <div className="p-3 bg-slate-50 rounded border">
                                     <span className="text-xs text-slate-400 uppercase font-bold">Entrega</span>

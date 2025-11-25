@@ -2,6 +2,8 @@ import {
     ProductionOrder, Employee, DailyLog, Incident, 
     PROCESS_FLOW_DEFAULT, OrderStatus, ProcessStatus, DesignData, ProductionArticle, EmployeeRole, ProcessType 
 } from '../types';
+import { db } from './firebase';
+import { collection, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 
 const KEYS = {
     ORDERS: 'procontrol_orders',
@@ -75,6 +77,34 @@ export const createInitialOrder = (
     };
     saveOrder(newOrder);
     return newOrder;
+};
+
+// --- Cloud Sync ---
+export const fetchPendingOrdersFromCloud = async () => {
+    try {
+        const pendingRef = collection(db, "pending_orders");
+        // Get all pending orders
+        const q = query(pendingRef); 
+        const querySnapshot = await getDocs(q);
+        
+        const retrievedOrders: any[] = [];
+        const docsToDelete: string[] = [];
+
+        querySnapshot.forEach((doc) => {
+            retrievedOrders.push(doc.data());
+            docsToDelete.push(doc.id);
+        });
+
+        // Delete from cloud after fetching (to avoid double sync)
+        // In a real production app, you might update a status instead of deleting.
+        const deletePromises = docsToDelete.map(id => deleteDoc(doc(db, "pending_orders", id)));
+        await Promise.all(deletePromises);
+
+        return retrievedOrders;
+    } catch (error) {
+        console.error("Error syncing from cloud:", error);
+        throw error;
+    }
 };
 
 // --- Employees ---
