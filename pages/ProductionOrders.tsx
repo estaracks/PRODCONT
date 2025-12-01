@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud
+    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud, confirmOrderSynced
 } from '../services/storageService';
 import { printOrder } from '../services/pdfService';
 import { 
@@ -255,17 +255,28 @@ const ProductionOrders = () => {
             console.log("Órdenes recuperadas:", remoteOrders);
             
             let count = 0;
-            remoteOrders.forEach(json => {
-                // Verificar si ya existe para no duplicar (opcional, pero buena práctica)
+            // Iterate sequentially to ensure safe saving before confirmation
+            for (const json of remoteOrders) {
+                // Verificar si ya existe para no duplicar
                 const exists = orders.some(o => o.orderNumber === json.external_id);
+                
                 if (!exists) {
                     const order = mapJsonToOrder(json);
                     if (order) {
-                        saveOrder(order);
+                        saveOrder(order); // Save to LocalStorage
                         count++;
+                        // IMPORTANT: Only delete from cloud after it is safely saved in local storage
+                        if (json._firestoreId) {
+                            await confirmOrderSynced(json._firestoreId);
+                        }
+                    }
+                } else {
+                    // It exists locally, so we can clean it up from cloud to avoid re-fetching
+                    if (json._firestoreId) {
+                        await confirmOrderSynced(json._firestoreId);
                     }
                 }
-            });
+            }
             
             if (count > 0) {
                 await loadData();
@@ -275,7 +286,7 @@ const ProductionOrders = () => {
             }
         } catch (error) {
             console.error("Sync Error Details:", error);
-            alert('Error al conectar con la nube. Revise la consola para más detalles y asegúrese de tener internet y permisos de Firebase configurados.');
+            alert('Error al conectar con la nube. Revise la consola para más detalles.');
         } finally {
             setSyncing(false);
         }

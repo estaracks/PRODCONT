@@ -79,31 +79,41 @@ export const createInitialOrder = (
     return newOrder;
 };
 
-// --- Cloud Sync ---
+// --- Cloud Sync (SAFE PROTOCOL) ---
+
+// Step 1: Just fetch, DO NOT DELETE yet
 export const fetchPendingOrdersFromCloud = async () => {
     try {
         const pendingRef = collection(db, "pending_orders");
-        // Get all pending orders
         const q = query(pendingRef); 
         const querySnapshot = await getDocs(q);
         
         const retrievedOrders: any[] = [];
-        const docsToDelete: string[] = [];
 
         querySnapshot.forEach((doc) => {
-            retrievedOrders.push(doc.data());
-            docsToDelete.push(doc.id);
+            // Attach the Firestore ID so we can delete it specifically later
+            retrievedOrders.push({
+                ...doc.data(),
+                _firestoreId: doc.id 
+            });
         });
-
-        // Delete from cloud after fetching (to avoid double sync)
-        // In a real production app, you might update a status instead of deleting.
-        const deletePromises = docsToDelete.map(id => deleteDoc(doc(db, "pending_orders", id)));
-        await Promise.all(deletePromises);
 
         return retrievedOrders;
     } catch (error) {
-        console.error("Error syncing from cloud:", error);
+        console.error("Error fetching from cloud:", error);
         throw error;
+    }
+};
+
+// Step 2: Confirmation delete (Only call this after successful local save)
+export const confirmOrderSynced = async (firestoreId: string) => {
+    if (!firestoreId) return;
+    try {
+        await deleteDoc(doc(db, "pending_orders", firestoreId));
+        console.log(`Synced and cleaned up: ${firestoreId}`);
+    } catch (error) {
+        console.error(`Failed to cleanup order ${firestoreId}`, error);
+        // We do not throw here to avoid crashing the UI loop, just log it.
     }
 };
 
@@ -250,9 +260,6 @@ export const seedDatabase = () => {
                 accessKey: 'DIR-777'
             }
         ];
-
-        // Merge existing with new to not lose data if desired, or overwrite. 
-        // For this request, we overwrite if critical users are missing to ensure app works.
         setData(KEYS.EMPLOYEES, initialUsers);
     }
 };
