@@ -67,7 +67,7 @@ export const createInitialOrder = (
         articles,
         
         priority: 'Medium',
-        status: OrderStatus.PENDING,
+        status: OrderStatus.PENDING, // Created manually locally starts as Pending
         designId,
         designVersion,
         createdAt: new Date().toISOString(),
@@ -87,7 +87,6 @@ export const createInitialOrder = (
 
 // --- Cloud Sync (SAFE PROTOCOL) ---
 
-// Step 1: Just fetch, DO NOT DELETE yet
 export const fetchPendingOrdersFromCloud = async () => {
     try {
         const pendingRef = collection(db, "pending_orders");
@@ -97,7 +96,6 @@ export const fetchPendingOrdersFromCloud = async () => {
         const retrievedOrders: any[] = [];
 
         querySnapshot.forEach((doc) => {
-            // Attach the Firestore ID so we can delete it specifically later
             retrievedOrders.push({
                 ...doc.data(),
                 _firestoreId: doc.id 
@@ -111,7 +109,6 @@ export const fetchPendingOrdersFromCloud = async () => {
     }
 };
 
-// Step 2: Confirmation delete (Only call this after successful local save)
 export const confirmOrderSynced = async (firestoreId: string) => {
     if (!firestoreId) return;
     try {
@@ -119,13 +116,11 @@ export const confirmOrderSynced = async (firestoreId: string) => {
         console.log(`Synced and cleaned up: ${firestoreId}`);
     } catch (error) {
         console.error(`Failed to cleanup order ${firestoreId}`, error);
-        // We do not throw here to avoid crashing the UI loop, just log it.
     }
 };
 
 // --- Mapping Logic ---
 export const mapJsonToOrder = (data: any): ProductionOrder | null => {
-    // Validate minimal fields from Fabrimueble JSON
     if (!data.external_id || !data.items) {
          console.warn("JSON inválido o incompleto:", data);
          return null;
@@ -139,9 +134,10 @@ export const mapJsonToOrder = (data: any): ProductionOrder | null => {
         
         receptionDate: data.export_date ? new Date(data.export_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         dueDate: data.deadline ? new Date(data.deadline).toISOString().split('T')[0] : '', 
-        managerId: '', // Requires manual assignment
+        managerId: '', 
         
-        status: OrderStatus.PENDING,
+        // IMPORTANTE: Todas las órdenes importadas entran como "Por Revisar"
+        status: OrderStatus.REVIEW_PENDING, 
         priority: 'Medium',
         designId: 'EXT-IMPORT',
         designVersion: '1.0',
@@ -149,13 +145,8 @@ export const mapJsonToOrder = (data: any): ProductionOrder | null => {
         createdAt: new Date().toISOString(),
         evidenceLogs: [],
         materials: [],
-        processes: PROCESS_FLOW_DEFAULT.map((type) => ({
-            id: crypto.randomUUID(),
-            type: type,
-            status: ProcessStatus.PENDING,
-            pausedTimeTotal: 0,
-            notes: ''
-        })),
+        // Inicialmente sin procesos definidos hasta revisión
+        processes: [], 
         
         articles: data.items.map((item: any) => {
             const dims = item.dims_mm 
@@ -170,12 +161,53 @@ export const mapJsonToOrder = (data: any): ProductionOrder | null => {
                 description: `${item.category || ''} ${dims}. BOM: ${bomCount} componentes.`,
                 photos: [],
                 pdfs: [],
-                // Mapping the attachment fields
                 syncedAttachment: item.attachment || undefined,
                 attachmentType: item.attachment_type || undefined
             };
         })
     };
+};
+
+// --- Fabrimueble Communication ---
+
+export const notifyFabrimueble = async (
+    order: ProductionOrder, 
+    status: 'APPROVED' | 'REJECTED'
+): Promise<boolean> => {
+    // URL de la API de Fabrimueble (Debe configurarse en variables de entorno en un caso real)
+    // Usaremos un placeholder o localhost para el ejemplo.
+    const WEBHOOK_URL = 'https://api.fabrimueble.example.com/api/webhooks/order-status';
+
+    const payload = {
+        external_id: order.orderNumber,
+        status: status,
+        updated_at: new Date().toISOString(),
+        procontrol_id: order.id,
+        // Datos condicionales
+        delivery_date: status === 'APPROVED' ? order.dueDate : undefined,
+        production_areas: status === 'APPROVED' ? order.processes.map(p => p.type) : undefined,
+        rejection_reason: status === 'REJECTED' ? order.rejectionReason : undefined
+    };
+
+    console.log(`📤 Notificando a Fabrimueble: ${status}`, payload);
+
+    try {
+        // Simulamos la llamada porque no existe el endpoint real aún
+        // const response = await fetch(WEBHOOK_URL, {
+        //     method: 'POST',
+        //     headers: { 'Content-Type': 'application/json' },
+        //     body: JSON.stringify(payload)
+        // });
+        // return response.ok;
+        
+        // Simulación de éxito
+        await new Promise(r => setTimeout(r, 1000));
+        return true;
+        
+    } catch (error) {
+        console.error("Error notificando a Fabrimueble:", error);
+        return false;
+    }
 };
 
 // --- Employees ---

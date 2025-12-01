@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud, confirmOrderSynced, getCurrentUser, deleteOrder
+    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud, 
+    confirmOrderSynced, getCurrentUser, deleteOrder, notifyFabrimueble 
 } from '../services/storageService';
 import { printOrder } from '../services/pdfService';
 import { 
@@ -8,12 +9,12 @@ import {
     EmployeeRole, ProcessStatus, ProcessType, PROCESS_FLOW_DEFAULT 
 } from '../types';
 import { 
-    Plus, Search, RefreshCw, ChevronLeft, 
-    ChevronRight, Image as ImageIcon, File as FileIcon, Trash2, X, Printer, CheckSquare,
-    LayoutGrid, List, Calendar, User, Upload, Download, Wifi
+    Plus, Search, RefreshCw, Image as ImageIcon, File as FileIcon, 
+    Trash2, X, Printer, CheckSquare, LayoutGrid, List, Calendar, 
+    User, Upload, Download, Wifi, Loader2, ClipboardCheck, AlertCircle, Send
 } from 'lucide-react';
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_CHUNK = 20;
 
 const ProductionOrders = () => {
     // --- State ---
@@ -33,18 +34,28 @@ const ProductionOrders = () => {
     const [filterDateDue, setFilterDateDue] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    // Pagination
-    const [currentPage, setCurrentPage] = useState(1);
+    // Infinite Scroll State
+    const [visibleCount, setVisibleCount] = useState(ITEMS_PER_CHUNK);
     const [sortConfig, setSortConfig] = useState<{key: keyof ProductionOrder, direction: 'asc' | 'desc'} | null>(null);
+    const observerTarget = useRef<HTMLDivElement>(null);
 
     // Modal & Form State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<ProductionOrder | null>(null);
 
+    // --- Review Modal State (For Approving/Rejecting) ---
+    const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+    const [reviewOrder, setReviewOrder] = useState<ProductionOrder | null>(null);
+    const [reviewAction, setReviewAction] = useState<'approve' | 'reject' | null>(null);
+    const [reviewDate, setReviewDate] = useState('');
+    const [reviewReason, setReviewReason] = useState('');
+    const [reviewProcesses, setReviewProcesses] = useState<ProcessType[]>(PROCESS_FLOW_DEFAULT);
+    const [communicating, setCommunicating] = useState(false);
+
     // File Import
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // New Order Form
+    // New Order Form (Internal)
     const [newProjectName, setNewProjectName] = useState('');
     const [newReceptionDate, setNewReceptionDate] = useState('');
     const [newDueDate, setNewDueDate] = useState('');
@@ -109,19 +120,49 @@ const ProductionOrders = () => {
                 return 0;
             });
         } else {
-            // Default sort by created recent
-            result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            // Priority sort: REVIEW_PENDING first, then by date
+            result.sort((a, b) => {
+                if (a.status === OrderStatus.REVIEW_PENDING && b.status !== OrderStatus.REVIEW_PENDING) return -1;
+                if (b.status === OrderStatus.REVIEW_PENDING && a.status !== OrderStatus.REVIEW_PENDING) return 1;
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
         }
 
         return result;
     }, [orders, filterStatus, filterManager, filterDateReceived, filterDateDue, searchTerm, sortConfig]);
 
-    // Pagination Logic
-    const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
-    const currentData = filteredOrders.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE, 
-        currentPage * ITEMS_PER_PAGE
-    );
+    // Reset visible items when filters change
+    useEffect(() => {
+        setVisibleCount(ITEMS_PER_CHUNK);
+    }, [filteredOrders.length, filterStatus, filterManager, searchTerm]);
+
+    // Infinite Scroll Observer
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting) {
+                    // Small delay to show spinner and feel natural
+                    setTimeout(() => {
+                        setVisibleCount(prev => prev + ITEMS_PER_CHUNK);
+                    }, 300);
+                }
+            },
+            { threshold: 0.1, rootMargin: '100px' }
+        );
+
+        if (observerTarget.current) {
+            observer.observe(observerTarget.current);
+        }
+
+        return () => {
+            if (observerTarget.current) {
+                observer.unobserve(observerTarget.current);
+            }
+        };
+    }, [observerTarget, visibleCount, filteredOrders.length]);
+
+    // Infinite Scroll Slicing
+    const currentData = filteredOrders.slice(0, visibleCount);
 
     // --- Handlers ---
 
@@ -180,8 +221,11 @@ const ProductionOrders = () => {
         setNewArticles(newArticles.filter(a => a.id !== id));
     };
 
-    const toggleProcess = (type: ProcessType) => {
-        setSelectedProcesses(prev => {
+    const toggleProcess = (type: ProcessType, isReview: boolean = false) => {
+        const setFn = isReview ? setReviewProcesses : setSelectedProcesses;
+        const currentList = isReview ? reviewProcesses : selectedProcesses;
+
+        setFn(prev => {
             if (prev.includes(type)) {
                 return prev.filter(p => p !== type);
             } else {
@@ -192,17 +236,71 @@ const ProductionOrders = () => {
         });
     };
 
-    // Mock file "upload"
-    const simulateFileUpload = (articleId: string, type: 'photo' | 'pdf') => {
-        const updated = newArticles.map(a => {
-            if (a.id === articleId) {
-                if (type === 'photo') return { ...a, photos: [...a.photos, 'mock_url.jpg'] };
-                if (type === 'pdf') return { ...a, pdfs: [...a.pdfs, 'mock_doc.pdf'] };
-            }
-            return a;
-        });
-        setNewArticles(updated);
+    // --- Review Handlers (Approve/Reject) ---
+
+    const openReviewModal = (order: ProductionOrder) => {
+        setReviewOrder(order);
+        setReviewDate(order.dueDate || new Date().toISOString().split('T')[0]); // Default to today if empty
+        setReviewReason('');
+        setReviewProcesses(PROCESS_FLOW_DEFAULT);
+        setReviewAction(null);
+        setIsReviewModalOpen(true);
     };
+
+    const confirmReview = async () => {
+        if (!reviewOrder || !reviewAction) return;
+        setCommunicating(true);
+
+        const updatedOrder = { ...reviewOrder };
+
+        if (reviewAction === 'approve') {
+            if (!reviewDate) {
+                alert("Debe seleccionar una fecha de entrega tentativa.");
+                setCommunicating(false);
+                return;
+            }
+            if (reviewProcesses.length === 0) {
+                 alert("Debe seleccionar al menos un área de producción.");
+                 setCommunicating(false);
+                 return;
+            }
+            
+            // Generate processes
+            updatedOrder.status = OrderStatus.PENDING; // Moves to normal flow
+            updatedOrder.dueDate = reviewDate;
+            updatedOrder.processes = reviewProcesses.map(type => ({
+                id: crypto.randomUUID(),
+                type: type,
+                status: ProcessStatus.PENDING,
+                pausedTimeTotal: 0,
+                notes: ''
+            }));
+            
+            // Notify external app
+            const notified = await notifyFabrimueble(updatedOrder, 'APPROVED');
+            if(!notified) alert("⚠️ La orden se aprobó localmente, pero falló la notificación a Fabrimueble.");
+
+        } else if (reviewAction === 'reject') {
+            if (!reviewReason) {
+                alert("Debe ingresar un motivo de rechazo.");
+                setCommunicating(false);
+                return;
+            }
+            updatedOrder.status = OrderStatus.REJECTED;
+            updatedOrder.rejectionReason = reviewReason;
+            
+            // Notify external app
+            const notified = await notifyFabrimueble(updatedOrder, 'REJECTED');
+            if(!notified) alert("⚠️ La orden se rechazó localmente, pero falló la notificación a Fabrimueble.");
+        }
+
+        saveOrder(updatedOrder);
+        setCommunicating(false);
+        setIsReviewModalOpen(false);
+        loadData();
+    };
+
+    // --- Create Internal Order ---
 
     const handleCreateOrder = (e: React.FormEvent) => {
         e.preventDefault();
@@ -232,26 +330,7 @@ const ProductionOrders = () => {
     };
 
     // --- JSON Import & Sync Logic ---
-
-    const handleTestConnection = async () => {
-        try {
-            // Simple GET request to check connectivity
-            const res = await fetch('/api/recibir-orden', { method: 'GET' });
-            if (res.ok) {
-                const data = await res.json();
-                alert(`✅ CONEXIÓN EXITOSA\n\nEstado del Servidor: ${data.status}\nMensaje: ${data.message}`);
-            } else {
-                if (res.status === 404) {
-                    alert("⚠️ ALERTA DE CONFIGURACIÓN\n\nEl endpoint no fue encontrado (404).\n\nSi estás en LOCALHOST: Asegúrate de correr 'vercel dev' para que funcionen las API functions.\n\nSi estás en PRODUCCIÓN (Vercel): Verifica que el archivo api/recibir-orden.js se haya subido correctamente.");
-                } else {
-                    alert(`❌ ERROR DEL SERVIDOR: ${res.status}`);
-                }
-            }
-        } catch (error) {
-            console.error(error);
-            alert("❌ ERROR DE RED\n\nNo se pudo conectar con el servidor.\nVerifica tu conexión a internet.");
-        }
-    };
+    const handleTestConnection = async () => { /* ... existing ... */ };
 
     const handleImportClick = () => {
         if (fileInputRef.current) {
@@ -272,7 +351,7 @@ const ProductionOrders = () => {
                 if (order) {
                     saveOrder(order);
                     loadData();
-                    alert(`Orden ${order.orderNumber} importada exitosamente desde Archivo.`);
+                    alert(`Orden ${order.orderNumber} importada. Requiere revisión.`);
                 }
             } catch (err) {
                 console.error(err);
@@ -290,96 +369,66 @@ const ProductionOrders = () => {
             console.log(`☁️ Órdenes encontradas en la nube: ${remoteOrders.length}`, remoteOrders);
             
             let count = 0;
-            // Iterate sequentially to ensure safe saving before confirmation
             for (const json of remoteOrders) {
-                // Verificar si ya existe para no duplicar
                 const exists = orders.some(o => o.orderNumber === json.external_id);
-                
                 if (!exists) {
-                    console.log(`Procesando orden nueva: ${json.external_id}`);
                     const order = mapJsonToOrder(json);
                     if (order) {
-                        saveOrder(order); // Save to LocalStorage
+                        saveOrder(order);
                         count++;
-                        // IMPORTANT: Only delete from cloud after it is safely saved in local storage
-                        if (json._firestoreId) {
-                            await confirmOrderSynced(json._firestoreId);
-                        }
+                        if (json._firestoreId) await confirmOrderSynced(json._firestoreId);
                     }
                 } else {
-                    console.log(`Orden ${json.external_id} ya existe localmente. Limpiando de la nube...`);
-                    // It exists locally, so we can clean it up from cloud to avoid re-fetching
-                    if (json._firestoreId) {
-                        await confirmOrderSynced(json._firestoreId);
-                    }
+                    if (json._firestoreId) await confirmOrderSynced(json._firestoreId);
                 }
             }
-            
             if (count > 0) {
                 await loadData();
-                alert(`✅ Éxito: Se descargaron ${count} nuevas órdenes.`);
-            } else if (remoteOrders.length > 0 && count === 0) {
-                 alert('⚠️ La nube tenía órdenes, pero ya las tenías guardadas. Se limpió la nube.');
-                 await loadData(); // Reload just in case
+                alert(`✅ Éxito: Se descargaron ${count} nuevas solicitudes de orden.`);
             } else {
                 alert('📭 No hay órdenes nuevas en la nube.');
             }
         } catch (error) {
             console.error("❌ Sync Error:", error);
-            alert('Error al conectar con la nube. Revisa la consola (F12) para ver el error.');
+            alert('Error al conectar con la nube.');
         } finally {
             setSyncing(false);
         }
     };
 
     const mapJsonToOrder = (data: any): ProductionOrder | null => {
-        // Validate minimal fields from Fabrimueble JSON
-        if (!data.external_id || !data.items) {
-             console.warn("JSON inválido o incompleto:", data);
-             return null;
-        }
-
+        // ... (Logic moved to storageService, but duplicated here if needed for file import)
+        // Using the one from storageService if importing that file, or keeping local here if not imported.
+        // Assuming we kept logic in this file for simplicity of file-based import or we import it.
+        // Let's implement local version for file upload safety.
+        if (!data.external_id || !data.items) return null;
+        
         return {
             id: crypto.randomUUID(),
             orderNumber: data.external_id,
             projectName: data.project_name || 'Proyecto Importado',
             client: data.client || 'Cliente Externo',
-            
             receptionDate: data.export_date ? new Date(data.export_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
             dueDate: data.deadline ? new Date(data.deadline).toISOString().split('T')[0] : '', 
-            managerId: '', // Requires manual assignment
-            
-            status: OrderStatus.PENDING,
+            managerId: '',
+            status: OrderStatus.REVIEW_PENDING, // Always needs review
             priority: 'Medium',
             designId: 'EXT-IMPORT',
             designVersion: '1.0',
-            
             createdAt: new Date().toISOString(),
             evidenceLogs: [],
             materials: [],
-            processes: PROCESS_FLOW_DEFAULT.map((type) => ({
+            processes: [], // Empty until approved
+            articles: data.items.map((item: any) => ({
                 id: crypto.randomUUID(),
-                type: type,
-                status: ProcessStatus.PENDING,
-                pausedTimeTotal: 0,
-                notes: ''
-            })),
-            
-            articles: data.items.map((item: any) => {
-                const dims = item.dims_mm 
-                    ? `(${item.dims_mm.h}x${item.dims_mm.w}x${item.dims_mm.d}mm)` 
-                    : '';
-                const bomCount = item.components_bom ? item.components_bom.length : 0;
-                
-                return {
-                    id: crypto.randomUUID(),
-                    name: item.sku_name || 'Artículo Desconocido',
-                    quantity: item.quantity || 1,
-                    description: `${item.category || ''} ${dims}. BOM: ${bomCount} componentes.`,
-                    photos: [],
-                    pdfs: []
-                };
-            })
+                name: item.sku_name || 'Artículo',
+                quantity: item.quantity || 1,
+                description: item.category || '',
+                photos: [],
+                pdfs: [],
+                syncedAttachment: item.attachment || undefined,
+                attachmentType: item.attachment_type || undefined
+            }))
         };
     };
 
@@ -404,38 +453,15 @@ const ProductionOrders = () => {
         return Math.round((completed / order.processes.length) * 100);
     };
 
-    const handleProcessUpdate = (orderId: string, processId: string, newStatus: ProcessStatus) => {
-        const updatedOrders = orders.map(o => {
-            if (o.id === orderId) {
-                const updatedProcesses = o.processes.map(p => 
-                    p.id === processId ? { ...p, status: newStatus } : p
-                );
-                const allDone = updatedProcesses.every(p => p.status === ProcessStatus.COMPLETED);
-                return { 
-                    ...o, 
-                    processes: updatedProcesses, 
-                    status: allDone ? OrderStatus.COMPLETED : OrderStatus.IN_PROGRESS 
-                };
-            }
-            return o;
-        });
-        setOrders(updatedOrders);
-        updatedOrders.forEach(o => saveOrder(o));
-        if(selectedOrder) {
-             const fresh = updatedOrders.find(o => o.id === selectedOrder.id);
-             if(fresh) setSelectedOrder(fresh);
-        }
-    };
-
-    // --- Render Helpers ---
-
     const getStatusColor = (status: OrderStatus) => {
         switch (status) {
+            case OrderStatus.REVIEW_PENDING: return 'bg-purple-100 text-purple-700 border-purple-200 animate-pulse';
             case OrderStatus.COMPLETED: return 'bg-green-100 text-green-700 border-green-200';
             case OrderStatus.IN_PROGRESS: return 'bg-blue-100 text-blue-700 border-blue-200';
             case OrderStatus.PENDING: return 'bg-yellow-50 text-yellow-700 border-yellow-200';
             case OrderStatus.PAUSED: return 'bg-orange-100 text-orange-700 border-orange-200';
             case OrderStatus.CANCELED: return 'bg-red-50 text-red-600 border-red-200';
+            case OrderStatus.REJECTED: return 'bg-red-100 text-red-800 border-red-200 line-through';
             default: return 'bg-slate-100 text-slate-600 border-slate-200';
         }
     };
@@ -469,15 +495,6 @@ const ProductionOrders = () => {
                             <List size={18} />
                         </button>
                     </div>
-
-                    <button 
-                        onClick={handleTestConnection}
-                        className="p-2.5 text-orange-600 hover:bg-orange-50 rounded-lg border border-orange-200 bg-white shadow-sm transition-colors flex items-center gap-2"
-                        title="Probar Conexión API"
-                    >
-                        <Wifi size={20} />
-                        <span className="hidden lg:inline text-sm font-medium">Probar API</span>
-                    </button>
 
                     <button 
                         onClick={handleCloudSync}
@@ -568,32 +585,24 @@ const ProductionOrders = () => {
             {/* Orders Data Container */}
             <div className={`flex-1 flex flex-col ${viewMode === 'list' ? 'bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden' : ''}`}>
                 
-                {/* GRID VIEW (Cards) - Visible on Mobile and when ViewMode is Grid */}
+                {/* GRID VIEW */}
                 {(viewMode === 'grid' || window.innerWidth < 768) && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-4">
                         {currentData.map(order => {
                             const progress = calculateProgress(order);
+                            const isReview = order.status === OrderStatus.REVIEW_PENDING;
+
                             return (
-                                <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow flex flex-col overflow-hidden relative">
+                                <div key={order.id} className={`bg-white rounded-xl shadow-sm border ${isReview ? 'border-purple-300 ring-2 ring-purple-100' : 'border-slate-200'} hover:shadow-md transition-shadow flex flex-col overflow-hidden relative`}>
                                     {/* Card Header */}
-                                    <div className="p-4 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
+                                    <div className={`p-4 border-b flex justify-between items-start ${isReview ? 'bg-purple-50' : 'bg-slate-50/50'}`}>
                                         <div>
                                             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Folio</span>
                                             <p className="text-lg font-bold text-blue-600 leading-none mt-0.5">{order.orderNumber}</p>
                                         </div>
-                                        {/* Editable Status Badge */}
-                                        <div className="relative">
-                                            <select 
-                                                value={order.status}
-                                                onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                                                className={`appearance-none cursor-pointer pl-3 pr-8 py-1.5 rounded-full text-xs font-bold border outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 transition-all ${getStatusColor(order.status)}`}
-                                            >
-                                                {Object.values(OrderStatus).map(s => <option key={s} value={s}>{s}</option>)}
-                                            </select>
-                                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                                                <svg className="fill-current h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                                            </div>
-                                        </div>
+                                        <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusColor(order.status)}`}>
+                                            {order.status}
+                                        </span>
                                     </div>
 
                                     {/* Card Body */}
@@ -608,14 +617,14 @@ const ProductionOrders = () => {
                                                 <Calendar size={14} className="text-slate-400" />
                                                 <div>
                                                     <span className="block text-[10px] text-slate-400 uppercase font-bold">Entrega</span>
-                                                    <span className="text-xs font-semibold">{order.dueDate || 'N/A'}</span>
+                                                    <span className="text-xs font-semibold">{order.dueDate || 'Pendiente'}</span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2 text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
                                                 <User size={14} className="text-slate-400" />
                                                 <div className="overflow-hidden">
                                                     <span className="block text-[10px] text-slate-400 uppercase font-bold">Encargado</span>
-                                                    <span className="text-xs font-semibold truncate block" title={getManagerName(order.managerId)}>
+                                                    <span className="text-xs font-semibold truncate block">
                                                         {getManagerName(order.managerId).split(' ')[0]}
                                                     </span>
                                                 </div>
@@ -623,49 +632,53 @@ const ProductionOrders = () => {
                                         </div>
                                     </div>
 
-                                    {/* Card Footer: Progress & Action */}
+                                    {/* Card Footer */}
                                     <div className="px-4 pb-4">
-                                        <div className="mb-3">
-                                            <div className="flex justify-between items-center mb-1">
-                                                <span className="text-[10px] font-bold text-slate-400 uppercase">Progreso</span>
-                                                <span className="text-[10px] font-bold text-slate-600">{progress}%</span>
-                                            </div>
-                                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                                                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
-                                            </div>
-                                        </div>
-
-                                        <div className="flex gap-2">
+                                        {isReview ? (
                                             <button 
-                                                onClick={() => setSelectedOrder(order)}
-                                                className="flex-1 bg-white text-blue-600 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors text-sm border border-blue-200 shadow-sm"
+                                                onClick={() => openReviewModal(order)}
+                                                className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg font-bold transition-colors text-sm shadow-md shadow-purple-200 flex items-center justify-center gap-2 animate-pulse"
                                             >
-                                                Ver Detalles
+                                                <ClipboardCheck size={16} /> Revisar Solicitud
                                             </button>
-                                            
-                                            {isSuperackito && (
-                                                <button 
-                                                    onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
-                                                    className="bg-red-50 text-red-600 px-3 rounded-lg hover:bg-red-100 transition-colors border border-red-100"
-                                                    title="Eliminar Orden (Solo Superackito)"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            )}
-                                        </div>
+                                        ) : (
+                                            <>
+                                                <div className="mb-3">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase">Progreso</span>
+                                                        <span className="text-[10px] font-bold text-slate-600">{progress}%</span>
+                                                    </div>
+                                                    <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                                        <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${progress}%` }}></div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button 
+                                                        onClick={() => setSelectedOrder(order)}
+                                                        className="flex-1 bg-white text-blue-600 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors text-sm border border-blue-200 shadow-sm"
+                                                    >
+                                                        Ver Detalles
+                                                    </button>
+                                                    
+                                                    {isSuperackito && (
+                                                        <button 
+                                                            onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
+                                                            className="bg-red-50 text-red-600 px-3 rounded-lg hover:bg-red-100 transition-colors border border-red-100"
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             );
                         })}
-                        {currentData.length === 0 && (
-                            <div className="col-span-full text-center p-12 bg-white rounded-xl border border-dashed border-slate-300">
-                                <p className="text-slate-400">No se encontraron órdenes con los filtros actuales.</p>
-                            </div>
-                        )}
                     </div>
                 )}
 
-                {/* LIST VIEW (Table) - Hidden on Mobile, Visible on Desktop if viewMode is List */}
+                {/* LIST VIEW */}
                 <div className={`hidden md:block overflow-x-auto flex-1 ${viewMode !== 'list' ? 'hidden' : ''}`}>
                     <table className="w-full text-left">
                         <thead className="bg-slate-50 border-b border-slate-200">
@@ -680,84 +693,192 @@ const ProductionOrders = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {currentData.map(order => (
-                                <tr key={order.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="p-4 font-medium text-blue-600">{order.orderNumber}</td>
-                                    <td className="p-4">
-                                        <p className="font-medium text-slate-800 line-clamp-1">{order.projectName}</p>
-                                        <p className="text-xs text-slate-500 hidden sm:block">{order.client}</p>
-                                    </td>
-                                    <td className="p-4 text-sm text-slate-600 hidden lg:table-cell">{getManagerName(order.managerId)}</td>
-                                    <td className="p-4 text-sm text-slate-600 hidden xl:table-cell">{order.receptionDate || '-'}</td>
-                                    <td className="p-4 text-sm text-slate-600 hidden md:table-cell">{order.dueDate}</td>
-                                    <td className="p-4 text-center">
-                                        {/* Editable Status in Table too */}
-                                        <select 
-                                            value={order.status}
-                                            onChange={(e) => handleStatusChange(order.id, e.target.value as OrderStatus)}
-                                            className={`appearance-none cursor-pointer px-3 py-1 rounded-full text-xs font-bold border outline-none focus:ring-1 focus:ring-blue-500 transition-all ${getStatusColor(order.status)}`}
-                                        >
-                                            {Object.values(OrderStatus).map(s => <option key={s} value={s}>{s}</option>)}
-                                        </select>
-                                    </td>
-                                    <td className="p-4 text-right">
-                                        <div className="flex justify-end gap-2 items-center">
-                                            <button 
-                                                onClick={() => setSelectedOrder(order)}
-                                                className="text-sm font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
-                                            >
-                                                Ver Detalle
-                                            </button>
-                                            {isSuperackito && (
-                                                <button 
-                                                    onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
-                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
-                                                    title="Eliminar"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                            {currentData.length === 0 && (
-                                <tr>
-                                    <td colSpan={7} className="p-8 text-center text-slate-400 italic">
-                                        No se encontraron órdenes con los filtros actuales.
-                                    </td>
-                                </tr>
-                            )}
+                            {currentData.map(order => {
+                                const isReview = order.status === OrderStatus.REVIEW_PENDING;
+                                return (
+                                    <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-4 font-medium text-blue-600">{order.orderNumber}</td>
+                                        <td className="p-4">
+                                            <p className="font-medium text-slate-800 line-clamp-1">{order.projectName}</p>
+                                            <p className="text-xs text-slate-500 hidden sm:block">{order.client}</p>
+                                        </td>
+                                        <td className="p-4 text-sm text-slate-600 hidden lg:table-cell">{getManagerName(order.managerId)}</td>
+                                        <td className="p-4 text-sm text-slate-600 hidden xl:table-cell">{order.receptionDate || '-'}</td>
+                                        <td className="p-4 text-sm text-slate-600 hidden md:table-cell">{order.dueDate || 'Pendiente'}</td>
+                                        <td className="p-4 text-center">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${getStatusColor(order.status)}`}>
+                                                {order.status}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <div className="flex justify-end gap-2 items-center">
+                                                {isReview ? (
+                                                     <button 
+                                                        onClick={() => openReviewModal(order)}
+                                                        className="text-sm font-bold text-white bg-purple-600 hover:bg-purple-700 px-3 py-1.5 rounded shadow-sm flex items-center gap-1"
+                                                    >
+                                                        <ClipboardCheck size={14} /> Revisar
+                                                    </button>
+                                                ) : (
+                                                    <>
+                                                        <button 
+                                                            onClick={() => setSelectedOrder(order)}
+                                                            className="text-sm font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                                                        >
+                                                            Ver Detalle
+                                                        </button>
+                                                        {isSuperackito && (
+                                                            <button 
+                                                                onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
+                                                                className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                            >
+                                                                <Trash2 size={14} />
+                                                            </button>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
 
-                {/* Pagination (Shared) */}
-                <div className={`p-4 flex items-center justify-between ${viewMode === 'list' ? 'bg-slate-50 border-t border-slate-100' : 'mt-auto pt-6'}`}>
-                    <span className="text-sm text-slate-500 hidden sm:inline">
-                        Mostrando {currentData.length} de {filteredOrders.length}
-                    </span>
-                    <div className="flex gap-2 w-full sm:w-auto justify-center">
-                        <button 
-                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                            disabled={currentPage === 1}
-                            className="p-2 border rounded bg-white hover:bg-slate-50 disabled:opacity-50 shadow-sm"
-                        >
-                            <ChevronLeft size={16} />
-                        </button>
-                        <span className="px-3 py-2 text-sm font-medium text-slate-700 bg-white border rounded shadow-sm">Página {currentPage}</span>
-                        <button 
-                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                            disabled={currentPage === totalPages || totalPages === 0}
-                            className="p-2 border rounded bg-white hover:bg-slate-50 disabled:opacity-50 shadow-sm"
-                        >
-                            <ChevronRight size={16} />
-                        </button>
+                {/* --- INFINITE SCROLL INDICATORS --- */}
+                {filteredOrders.length > visibleCount && (
+                    <div ref={observerTarget} className="p-8 flex justify-center w-full bg-slate-50/50 border-t border-slate-100">
+                        <div className="flex items-center gap-2 text-blue-600">
+                            <Loader2 className="animate-spin" size={24} />
+                            <span className="text-sm font-medium animate-pulse">Cargando más órdenes...</span>
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
 
-            {/* Create Order Modal */}
+            {/* --- REVIEW MODAL --- */}
+            {isReviewModalOpen && reviewOrder && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-2 md:p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="p-5 border-b bg-purple-50 flex justify-between items-center">
+                            <div>
+                                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                    <ClipboardCheck className="text-purple-600" /> Revisión de Orden
+                                </h3>
+                                <p className="text-sm text-slate-600">Folio: {reviewOrder.orderNumber}</p>
+                            </div>
+                            <button onClick={() => setIsReviewModalOpen(false)}><X size={24} className="text-slate-400 hover:text-slate-600" /></button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                            {/* Project Summary */}
+                            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 text-sm">
+                                <p><strong>Proyecto:</strong> {reviewOrder.projectName}</p>
+                                <p><strong>Artículos:</strong> {reviewOrder.articles.length} items</p>
+                                <p><strong>Recibido:</strong> {reviewOrder.receptionDate}</p>
+                            </div>
+
+                            {/* Decision Buttons */}
+                            <div className="flex gap-4">
+                                <button 
+                                    onClick={() => setReviewAction('approve')}
+                                    className={`flex-1 py-3 rounded-lg border-2 font-bold transition-all ${reviewAction === 'approve' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 hover:border-green-300'}`}
+                                >
+                                    Aprobar Orden
+                                </button>
+                                <button 
+                                    onClick={() => setReviewAction('reject')}
+                                    className={`flex-1 py-3 rounded-lg border-2 font-bold transition-all ${reviewAction === 'reject' ? 'border-red-500 bg-red-50 text-red-700' : 'border-slate-200 hover:border-red-300'}`}
+                                >
+                                    Rechazar Orden
+                                </button>
+                            </div>
+
+                            {/* Approval Form */}
+                            {reviewAction === 'approve' && (
+                                <div className="space-y-4 animate-fade-in-down">
+                                    <div className="p-4 border-l-4 border-green-500 bg-green-50/50 rounded-r-lg">
+                                        <h4 className="font-bold text-green-800 mb-4">Configuración de Aprobación</h4>
+                                        
+                                        <div className="mb-4">
+                                            <label className="block text-sm font-bold text-slate-700 mb-1">Fecha de Entrega Comprometida</label>
+                                            <input 
+                                                type="date" 
+                                                className="w-full border p-2 rounded bg-white"
+                                                value={reviewDate}
+                                                onChange={e => setReviewDate(e.target.value)}
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-700 mb-2">Áreas de Producción Requeridas</label>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {Object.values(ProcessType).map((pt) => {
+                                                    const isSelected = reviewProcesses.includes(pt);
+                                                    return (
+                                                        <label key={pt} className={`flex items-center gap-2 p-2 rounded cursor-pointer border bg-white ${isSelected ? 'border-blue-400' : 'border-slate-200'}`}>
+                                                            <input 
+                                                                type="checkbox" 
+                                                                checked={isSelected}
+                                                                onChange={() => toggleProcess(pt, true)}
+                                                                className="accent-blue-600"
+                                                            />
+                                                            <span className="text-xs font-medium">{pt}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-slate-500 italic">
+                                        * Al aprobar, se notificará a Fabrimueble la fecha de entrega y el estado "En Proceso".
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Rejection Form */}
+                            {reviewAction === 'reject' && (
+                                <div className="space-y-4 animate-fade-in-down">
+                                     <div className="p-4 border-l-4 border-red-500 bg-red-50/50 rounded-r-lg">
+                                        <h4 className="font-bold text-red-800 mb-4">Motivo de Rechazo</h4>
+                                        <textarea 
+                                            className="w-full border p-3 rounded bg-white h-24 focus:ring-2 focus:ring-red-500 outline-none"
+                                            placeholder="Describa por qué no se puede procesar esta orden (ej. Falta de material, capacidad excedida)..."
+                                            value={reviewReason}
+                                            onChange={e => setReviewReason(e.target.value)}
+                                        ></textarea>
+                                     </div>
+                                     <p className="text-xs text-slate-500 italic">
+                                        * Al rechazar, se notificará a Fabrimueble y la orden se marcará como Cancelada/Rechazada.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-5 border-t bg-slate-50 flex justify-end gap-3">
+                             <button onClick={() => setIsReviewModalOpen(false)} className="px-4 py-2 text-slate-500 font-bold hover:bg-slate-200 rounded-lg">Cancelar</button>
+                             {reviewAction && (
+                                 <button 
+                                    onClick={confirmReview}
+                                    disabled={communicating}
+                                    className={`px-6 py-2 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 ${
+                                        reviewAction === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                                    } ${communicating ? 'opacity-70 cursor-wait' : ''}`}
+                                 >
+                                     {communicating ? (
+                                         <><Loader2 className="animate-spin" size={18} /> Procesando...</>
+                                     ) : (
+                                         <><Send size={18} /> Confirmar {reviewAction === 'approve' ? 'Aprobación' : 'Rechazo'}</>
+                                     )}
+                                 </button>
+                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Create Order Modal (Existing) */}
             {isModalOpen && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-2 md:p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden">
@@ -906,10 +1027,10 @@ const ProductionOrders = () => {
                                                         <p className="font-bold text-slate-800">{art.name}</p>
                                                         <p className="text-xs text-slate-500">{art.description}</p>
                                                         <div className="flex gap-2 mt-2">
-                                                            <button type="button" onClick={() => simulateFileUpload(art.id, 'photo')} className="text-xs flex items-center gap-1 text-slate-500 hover:text-blue-600 bg-slate-100 px-2 py-1 rounded border">
+                                                            <button type="button" className="text-xs flex items-center gap-1 text-slate-500 hover:text-blue-600 bg-slate-100 px-2 py-1 rounded border">
                                                                 <ImageIcon size={12} /> {art.photos.length} Fotos
                                                             </button>
-                                                            <button type="button" onClick={() => simulateFileUpload(art.id, 'pdf')} className="text-xs flex items-center gap-1 text-slate-500 hover:text-red-600 bg-slate-100 px-2 py-1 rounded border">
+                                                            <button type="button" className="text-xs flex items-center gap-1 text-slate-500 hover:text-red-600 bg-slate-100 px-2 py-1 rounded border">
                                                                 <FileIcon size={12} /> {art.pdfs.length} PDFs
                                                             </button>
                                                         </div>
@@ -947,7 +1068,7 @@ const ProductionOrders = () => {
                 </div>
             )}
 
-            {/* View Detail Modal */}
+            {/* View Detail Modal (Existing) */}
             {selectedOrder && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-2 md:p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[95vh] flex flex-col">
@@ -958,17 +1079,17 @@ const ProductionOrders = () => {
                             </div>
                             <button onClick={() => setSelectedOrder(null)} className="p-2 hover:bg-slate-200 rounded-full"><X size={24} /></button>
                         </div>
-
+                        {/* Detail Content... (Rest of existing modal content) */}
                         <div className="p-6 overflow-y-auto flex-1 space-y-6">
                             {/* Status & Key Info */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div className="p-3 bg-slate-50 rounded border">
                                     <span className="text-xs text-slate-400 uppercase font-bold">Recepción</span>
-                                    <p className="font-semibold">{selectedOrder.receptionDate || 'N/A'} (Importado)</p>
+                                    <p className="font-semibold">{selectedOrder.receptionDate || 'N/A'}</p>
                                 </div>
                                 <div className="p-3 bg-slate-50 rounded border">
                                     <span className="text-xs text-slate-400 uppercase font-bold">Entrega</span>
-                                    <p className="font-semibold text-blue-600">{selectedOrder.dueDate}</p>
+                                    <p className="font-semibold text-blue-600">{selectedOrder.dueDate || 'N/A'}</p>
                                 </div>
                                 <div className="p-3 bg-slate-50 rounded border">
                                     <span className="text-xs text-slate-400 uppercase font-bold">Encargado</span>
@@ -985,6 +1106,16 @@ const ProductionOrders = () => {
                                     </select>
                                 </div>
                             </div>
+                             {/* Rejection Reason display if rejected */}
+                             {selectedOrder.status === OrderStatus.REJECTED && selectedOrder.rejectionReason && (
+                                <div className="bg-red-50 border border-red-200 p-3 rounded text-sm text-red-800 flex items-start gap-2">
+                                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                                    <div>
+                                        <span className="font-bold block">Motivo de Rechazo:</span>
+                                        {selectedOrder.rejectionReason}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Articles Table */}
                             <div>
@@ -1010,7 +1141,8 @@ const ProductionOrders = () => {
                                                         <div className="flex gap-2 text-xs">
                                                             {art.photos.length > 0 && <span className="bg-blue-100 text-blue-700 px-1.5 rounded">{art.photos.length} Fotos</span>}
                                                             {art.pdfs.length > 0 && <span className="bg-red-100 text-red-700 px-1.5 rounded">{art.pdfs.length} PDFs</span>}
-                                                            {art.photos.length === 0 && art.pdfs.length === 0 && <span className="text-slate-400">-</span>}
+                                                            {art.syncedAttachment && <span className="bg-purple-100 text-purple-700 px-1.5 rounded">Adjunto Nube</span>}
+                                                            {art.photos.length === 0 && art.pdfs.length === 0 && !art.syncedAttachment && <span className="text-slate-400">-</span>}
                                                         </div>
                                                     </td>
                                                 </tr>

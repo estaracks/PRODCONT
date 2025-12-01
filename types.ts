@@ -11,12 +11,14 @@ export enum ProcessType {
 }
 
 export enum OrderStatus {
+    REVIEW_PENDING = 'Por Revisar', // Nuevo estado para importaciones
     PENDING = 'Pendiente',
     IN_PROGRESS = 'En Proceso',
     PAUSED = 'Pausada',
     COMPLETED = 'Completada',
     DELIVERED = 'Entregada',
-    CANCELED = 'Cancelada'
+    CANCELED = 'Cancelada',
+    REJECTED = 'Rechazada' // Nuevo estado
 }
 
 export enum ProcessStatus {
@@ -78,7 +80,7 @@ export interface ProductionArticle {
 
 export interface ProductionOrder {
     id: string;
-    orderNumber: string;
+    orderNumber: string; // This corresponds to external_id from Fabrimueble
     projectName: string; // Previously client, now project name
     client: string;      // Kept for backward compatibility
     
@@ -92,6 +94,7 @@ export interface ProductionOrder {
     priority: 'High' | 'Medium' | 'Low';
     dueDate: string; // Estimated delivery date
     status: OrderStatus;
+    rejectionReason?: string; // Nuevo campo
     
     processes: ProcessStep[];
     materials: MaterialItem[]; // Kept for MVP compatibility
