@@ -10,7 +10,7 @@ import {
 import { 
     Plus, Search, RefreshCw, ChevronLeft, 
     ChevronRight, Image as ImageIcon, File as FileIcon, Trash2, X, Printer, CheckSquare,
-    LayoutGrid, List, Calendar, User, Upload, Download
+    LayoutGrid, List, Calendar, User, Upload, Download, Wifi
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 10;
@@ -217,6 +217,26 @@ const ProductionOrders = () => {
     };
 
     // --- JSON Import & Sync Logic ---
+
+    const handleTestConnection = async () => {
+        try {
+            // Simple GET request to check connectivity
+            const res = await fetch('/api/recibir-orden', { method: 'GET' });
+            if (res.ok) {
+                const data = await res.json();
+                alert(`✅ CONEXIÓN EXITOSA\n\nEstado del Servidor: ${data.status}\nMensaje: ${data.message}`);
+            } else {
+                if (res.status === 404) {
+                    alert("⚠️ ALERTA DE CONFIGURACIÓN\n\nEl endpoint no fue encontrado (404).\n\nSi estás en LOCALHOST: Asegúrate de correr 'vercel dev' para que funcionen las API functions.\n\nSi estás en PRODUCCIÓN (Vercel): Verifica que el archivo api/recibir-orden.js se haya subido correctamente.");
+                } else {
+                    alert(`❌ ERROR DEL SERVIDOR: ${res.status}`);
+                }
+            }
+        } catch (error) {
+            console.error(error);
+            alert("❌ ERROR DE RED\n\nNo se pudo conectar con el servidor.\nVerifica tu conexión a internet.");
+        }
+    };
 
     const handleImportClick = () => {
         if (fileInputRef.current) {
@@ -434,6 +454,15 @@ const ProductionOrders = () => {
                             <List size={18} />
                         </button>
                     </div>
+
+                    <button 
+                        onClick={handleTestConnection}
+                        className="p-2.5 text-orange-600 hover:bg-orange-50 rounded-lg border border-orange-200 bg-white shadow-sm transition-colors flex items-center gap-2"
+                        title="Probar Conexión API"
+                    >
+                        <Wifi size={20} />
+                        <span className="hidden lg:inline text-sm font-medium">Probar API</span>
+                    </button>
 
                     <button 
                         onClick={handleCloudSync}
@@ -941,59 +970,33 @@ const ProductionOrders = () => {
                                                     <td className="p-2 text-center font-bold">{art.quantity}</td>
                                                     <td className="p-2">
                                                         <div className="flex gap-2 text-xs">
-                                                            {art.photos.length > 0 && <span className="bg-blue-100 text-blue-700 px-1.5 rounded">{art.photos.length} Img</span>}
-                                                            {art.pdfs.length > 0 && <span className="bg-red-100 text-red-700 px-1.5 rounded">{art.pdfs.length} Doc</span>}
+                                                            {art.photos.length > 0 && <span className="bg-blue-100 text-blue-700 px-1.5 rounded">{art.photos.length} Fotos</span>}
+                                                            {art.pdfs.length > 0 && <span className="bg-red-100 text-red-700 px-1.5 rounded">{art.pdfs.length} PDFs</span>}
                                                             {art.photos.length === 0 && art.pdfs.length === 0 && <span className="text-slate-400">-</span>}
                                                         </div>
                                                     </td>
                                                 </tr>
                                             )) : (
-                                                <tr><td colSpan={3} className="p-4 text-center text-slate-400">Orden creada con sistema anterior (Sin artículos detallados)</td></tr>
+                                                <tr>
+                                                    <td colSpan={3} className="p-4 text-center text-slate-400 italic">No hay artículos registrados.</td>
+                                                </tr>
                                             )}
                                         </tbody>
                                     </table>
                                 </div>
                             </div>
-
-                            {/* Production Progress */}
-                            <div>
-                                <h4 className="text-lg font-bold mb-3 border-b pb-2">Seguimiento de Procesos</h4>
-                                <div className="space-y-2">
-                                    {selectedOrder.processes.map(proc => (
-                                        <div key={proc.id} className="flex items-center justify-between bg-slate-50 p-3 rounded border">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-3 h-3 rounded-full ${
-                                                    proc.status === ProcessStatus.COMPLETED ? 'bg-green-500' : 
-                                                    proc.status === ProcessStatus.ACTIVE ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'
-                                                }`} />
-                                                <span className="font-medium">{proc.type}</span>
-                                            </div>
-                                            <div className="flex gap-2">
-                                                 {proc.status !== ProcessStatus.COMPLETED && (
-                                                    <button 
-                                                        onClick={() => handleProcessUpdate(selectedOrder.id, proc.id, ProcessStatus.COMPLETED)}
-                                                        className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded hover:bg-green-200 font-medium"
-                                                    >
-                                                        Marcar Listo
-                                                    </button>
-                                                 )}
-                                                 {proc.status === ProcessStatus.COMPLETED && <span className="text-xs text-green-600 font-bold">Completado</span>}
-                                            </div>
-                                        </div>
-                                    ))}
-                                    {selectedOrder.processes.length === 0 && (
-                                        <div className="text-slate-400 italic text-sm">Sin procesos definidos.</div>
-                                    )}
-                                </div>
-                            </div>
                         </div>
-
-                        <div className="p-5 border-t bg-slate-50 flex justify-end gap-3">
+                         <div className="p-5 border-t bg-slate-50 flex justify-end gap-3">
                             <button 
-                                onClick={() => printOrder(selectedOrder, getManagerName(selectedOrder.managerId))} 
-                                className="px-5 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 flex items-center gap-2 shadow-sm"
+                                onClick={() => {
+                                    if(selectedOrder) printOrder(selectedOrder, getManagerName(selectedOrder.managerId));
+                                }}
+                                className="px-4 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100 flex items-center gap-2"
                             >
-                                <Printer size={18} /> Imprimir Orden PDF
+                                <Printer size={18} /> Imprimir
+                            </button>
+                            <button onClick={() => setSelectedOrder(null)} className="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                                Cerrar
                             </button>
                         </div>
                     </div>
