@@ -70,6 +70,10 @@ export interface ProductionArticle {
     quantity: number;
     photos: string[]; // Simulated URLs or Base64
     pdfs: string[];   // Simulated URLs or Base64
+    
+    // New fields for Cloud Sync Attachments
+    syncedAttachment?: string; // Base64 string
+    attachmentType?: 'pdf' | 'image';
 }
 
 export interface ProductionOrder {

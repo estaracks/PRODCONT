@@ -23,17 +23,18 @@ export const printOrder = (order: ProductionOrder, managerName?: string) => {
                 <td>
                    ${art.photos.length} Fotos<br>
                    ${art.pdfs.length} Docs
+                   ${art.syncedAttachment ? '<br><span style="color:blue; font-weight:bold;">+ Adjunto Fabrimueble</span>' : ''}
                 </td>
             </tr>
           `).join('')
         : `<tr><td colspan="3">Cantidad Genérica: ${order.materials?.length || 0} items (Modo Legado)</td></tr>`;
 
     // Logic to build the specific attachments appendix
-    const hasAttachments = order.articles?.some(a => a.photos.length > 0 || a.pdfs.length > 0);
+    const hasAttachments = order.articles?.some(a => a.photos.length > 0 || a.pdfs.length > 0 || a.syncedAttachment);
     
     const attachmentsHtml = hasAttachments 
         ? order.articles.map((art, index) => {
-            if (art.photos.length === 0 && art.pdfs.length === 0) return '';
+            if (art.photos.length === 0 && art.pdfs.length === 0 && !art.syncedAttachment) return '';
             
             const photosList = art.photos.map((p, i) => `
                 <div class="file-badge photo">
@@ -47,6 +48,44 @@ export const printOrder = (order: ProductionOrder, managerName?: string) => {
                 </div>
             `).join('');
 
+            // --- HANDLING SYNCED FILES (BASE64) ---
+            let syncedContentHtml = '';
+            if (art.syncedAttachment) {
+                const isPdf = art.attachmentType === 'pdf';
+                const fileTypeLabel = isPdf ? 'Plano PDF (Fabrimueble)' : 'Imagen Referencia (Fabrimueble)';
+                
+                // Note: Standard data URI usually includes mime type. 
+                // If not provided in string, we guess based on type.
+                let dataUri = art.syncedAttachment;
+                if (!dataUri.startsWith('data:')) {
+                    const mime = isPdf ? 'application/pdf' : 'image/jpeg';
+                    dataUri = `data:${mime};base64,${art.syncedAttachment}`;
+                }
+
+                if (isPdf) {
+                    // Rendering PDF for Print is tricky. <embed> is the standard way.
+                    syncedContentHtml = `
+                        <div class="file-section page-break-inside">
+                            <div class="fs-title" style="color: #ea580c;">${fileTypeLabel}</div>
+                            <div style="border: 1px solid #ccc; height: 800px; width: 100%;">
+                                <embed src="${dataUri}" width="100%" height="100%" type="application/pdf">
+                                <p style="text-align:center; margin-top:10px; font-size:10px; color:#666;">
+                                    Si el PDF no es visible, el navegador podría estar bloqueando objetos embebidos en modo impresión.
+                                </p>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Image
+                    syncedContentHtml = `
+                        <div class="file-section page-break-inside">
+                            <div class="fs-title" style="color: #ea580c;">${fileTypeLabel}</div>
+                            <img src="${dataUri}" style="max-width: 100%; border: 1px solid #eee; border-radius: 4px;" />
+                        </div>
+                    `;
+                }
+            }
+
             return `
                 <div class="attachment-box">
                     <div class="attachment-header">
@@ -57,19 +96,22 @@ export const printOrder = (order: ProductionOrder, managerName?: string) => {
                     <div class="attachment-content">
                         ${art.photos.length > 0 ? `
                             <div class="file-section">
-                                <div class="fs-title">Fotografías de Referencia</div>
+                                <div class="fs-title">Fotografías de Referencia (Locales)</div>
                                 <div class="badges-container">${photosList}</div>
                             </div>
                         ` : ''}
                         
                         ${art.pdfs.length > 0 ? `
                             <div class="file-section">
-                                <div class="fs-title">Documentación Técnica y Planos</div>
+                                <div class="fs-title">Docs Técnicos (Locales)</div>
                                 <div class="badges-container">${pdfsList}</div>
                             </div>
                         ` : ''}
+
+                        ${syncedContentHtml}
                     </div>
                 </div>
+                ${art.syncedAttachment && art.attachmentType === 'pdf' ? '<div class="page-break"></div>' : ''} 
             `;
         }).join('')
         : '<div class="no-attachments">No hay archivos adjuntos registrados en esta orden.</div>';
@@ -83,6 +125,7 @@ export const printOrder = (order: ProductionOrder, managerName?: string) => {
                 
                 /* Layout Utility */
                 .page-break { page-break-before: always; display: block; height: 1px; border-top: 1px dashed #ccc; margin: 30px 0; }
+                .page-break-inside { break-inside: avoid; }
                 
                 /* Header */
                 .header-container { border-bottom: 3px solid #1e3a8a; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; }

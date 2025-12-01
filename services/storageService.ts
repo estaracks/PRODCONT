@@ -123,6 +123,61 @@ export const confirmOrderSynced = async (firestoreId: string) => {
     }
 };
 
+// --- Mapping Logic ---
+export const mapJsonToOrder = (data: any): ProductionOrder | null => {
+    // Validate minimal fields from Fabrimueble JSON
+    if (!data.external_id || !data.items) {
+         console.warn("JSON inválido o incompleto:", data);
+         return null;
+    }
+
+    return {
+        id: crypto.randomUUID(),
+        orderNumber: data.external_id,
+        projectName: data.project_name || 'Proyecto Importado',
+        client: data.client || 'Cliente Externo',
+        
+        receptionDate: data.export_date ? new Date(data.export_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        dueDate: data.deadline ? new Date(data.deadline).toISOString().split('T')[0] : '', 
+        managerId: '', // Requires manual assignment
+        
+        status: OrderStatus.PENDING,
+        priority: 'Medium',
+        designId: 'EXT-IMPORT',
+        designVersion: '1.0',
+        
+        createdAt: new Date().toISOString(),
+        evidenceLogs: [],
+        materials: [],
+        processes: PROCESS_FLOW_DEFAULT.map((type) => ({
+            id: crypto.randomUUID(),
+            type: type,
+            status: ProcessStatus.PENDING,
+            pausedTimeTotal: 0,
+            notes: ''
+        })),
+        
+        articles: data.items.map((item: any) => {
+            const dims = item.dims_mm 
+                ? `(${item.dims_mm.h}x${item.dims_mm.w}x${item.dims_mm.d}mm)` 
+                : '';
+            const bomCount = item.components_bom ? item.components_bom.length : 0;
+            
+            return {
+                id: crypto.randomUUID(),
+                name: item.sku_name || 'Artículo Desconocido',
+                quantity: item.quantity || 1,
+                description: `${item.category || ''} ${dims}. BOM: ${bomCount} componentes.`,
+                photos: [],
+                pdfs: [],
+                // Mapping the attachment fields
+                syncedAttachment: item.attachment || undefined,
+                attachmentType: item.attachment_type || undefined
+            };
+        })
+    };
+};
+
 // --- Employees ---
 export const getEmployees = (): Employee[] => getData<Employee>(KEYS.EMPLOYEES);
 
