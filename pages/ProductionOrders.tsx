@@ -250,9 +250,9 @@ const ProductionOrders = () => {
     const handleCloudSync = async () => {
         setSyncing(true);
         try {
-            console.log("Iniciando sincronización con Firebase Cloud...");
+            console.log("☁️ Iniciando descarga de órdenes desde Firebase...");
             const remoteOrders = await fetchPendingOrdersFromCloud();
-            console.log("Órdenes recuperadas:", remoteOrders);
+            console.log(`☁️ Órdenes encontradas en la nube: ${remoteOrders.length}`, remoteOrders);
             
             let count = 0;
             // Iterate sequentially to ensure safe saving before confirmation
@@ -261,6 +261,7 @@ const ProductionOrders = () => {
                 const exists = orders.some(o => o.orderNumber === json.external_id);
                 
                 if (!exists) {
+                    console.log(`Procesando orden nueva: ${json.external_id}`);
                     const order = mapJsonToOrder(json);
                     if (order) {
                         saveOrder(order); // Save to LocalStorage
@@ -271,6 +272,7 @@ const ProductionOrders = () => {
                         }
                     }
                 } else {
+                    console.log(`Orden ${json.external_id} ya existe localmente. Limpiando de la nube...`);
                     // It exists locally, so we can clean it up from cloud to avoid re-fetching
                     if (json._firestoreId) {
                         await confirmOrderSynced(json._firestoreId);
@@ -280,13 +282,16 @@ const ProductionOrders = () => {
             
             if (count > 0) {
                 await loadData();
-                alert(`Éxito: Se sincronizaron ${count} nuevas órdenes desde la nube.`);
+                alert(`✅ Éxito: Se descargaron ${count} nuevas órdenes.`);
+            } else if (remoteOrders.length > 0 && count === 0) {
+                 alert('⚠️ La nube tenía órdenes, pero ya las tenías guardadas. Se limpió la nube.');
+                 await loadData(); // Reload just in case
             } else {
-                alert('Sincronización completa: No se encontraron órdenes nuevas en la nube.');
+                alert('📭 No hay órdenes nuevas en la nube.');
             }
         } catch (error) {
-            console.error("Sync Error Details:", error);
-            alert('Error al conectar con la nube. Revise la consola para más detalles.');
+            console.error("❌ Sync Error:", error);
+            alert('Error al conectar con la nube. Revisa la consola (F12) para ver el error.');
         } finally {
             setSyncing(false);
         }
