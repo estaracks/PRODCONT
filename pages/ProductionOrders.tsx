@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud, confirmOrderSynced
+    getOrders, saveOrder, createInitialOrder, getEmployees, fetchPendingOrdersFromCloud, confirmOrderSynced, getCurrentUser, deleteOrder
 } from '../services/storageService';
 import { printOrder } from '../services/pdfService';
 import { 
@@ -21,6 +21,7 @@ const ProductionOrders = () => {
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [currentUser, setCurrentUser] = useState<Employee | null>(null);
     
     // View Mode
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -67,8 +68,12 @@ const ProductionOrders = () => {
         await new Promise(r => setTimeout(r, 500));
         setOrders(getOrders());
         setEmployees(getEmployees());
+        setCurrentUser(getCurrentUser());
         setLoading(false);
     };
+
+    // Permission Check
+    const isSuperackito = currentUser?.employeeNumber === 'Superackito';
 
     // --- Filtering & Sorting Logic ---
     const filteredOrders = useMemo(() => {
@@ -142,6 +147,16 @@ const ProductionOrders = () => {
         // Also update selectedOrder if it's the one being modified
         if (selectedOrder && selectedOrder.id === orderId) {
             setSelectedOrder({ ...selectedOrder, status: newStatus });
+        }
+    };
+
+    const handleDeleteOrder = (orderId: string, orderNumber: string) => {
+        if (window.confirm(`⚠️ ADVERTENCIA: ¿Estás seguro de que deseas ELIMINAR permanentemente la orden ${orderNumber}? Esta acción no se puede deshacer.`)) {
+            deleteOrder(orderId);
+            loadData();
+            if (selectedOrder && selectedOrder.id === orderId) {
+                setSelectedOrder(null);
+            }
         }
     };
 
@@ -559,7 +574,7 @@ const ProductionOrders = () => {
                         {currentData.map(order => {
                             const progress = calculateProgress(order);
                             return (
-                                <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow flex flex-col overflow-hidden">
+                                <div key={order.id} className="bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow flex flex-col overflow-hidden relative">
                                     {/* Card Header */}
                                     <div className="p-4 border-b border-slate-50 flex justify-between items-start bg-slate-50/50">
                                         <div>
@@ -620,12 +635,24 @@ const ProductionOrders = () => {
                                             </div>
                                         </div>
 
-                                        <button 
-                                            onClick={() => setSelectedOrder(order)}
-                                            className="w-full bg-white text-blue-600 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors text-sm border border-blue-200 shadow-sm"
-                                        >
-                                            Ver Detalles
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => setSelectedOrder(order)}
+                                                className="flex-1 bg-white text-blue-600 py-2 rounded-lg font-medium hover:bg-blue-50 transition-colors text-sm border border-blue-200 shadow-sm"
+                                            >
+                                                Ver Detalles
+                                            </button>
+                                            
+                                            {isSuperackito && (
+                                                <button 
+                                                    onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
+                                                    className="bg-red-50 text-red-600 px-3 rounded-lg hover:bg-red-100 transition-colors border border-red-100"
+                                                    title="Eliminar Orden (Solo Superackito)"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             );
@@ -674,12 +701,23 @@ const ProductionOrders = () => {
                                         </select>
                                     </td>
                                     <td className="p-4 text-right">
-                                        <button 
-                                            onClick={() => setSelectedOrder(order)}
-                                            className="text-sm font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
-                                        >
-                                            Ver Detalle
-                                        </button>
+                                        <div className="flex justify-end gap-2 items-center">
+                                            <button 
+                                                onClick={() => setSelectedOrder(order)}
+                                                className="text-sm font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
+                                            >
+                                                Ver Detalle
+                                            </button>
+                                            {isSuperackito && (
+                                                <button 
+                                                    onClick={() => handleDeleteOrder(order.id, order.orderNumber)}
+                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                    title="Eliminar"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             ))}
@@ -987,6 +1025,14 @@ const ProductionOrders = () => {
                             </div>
                         </div>
                          <div className="p-5 border-t bg-slate-50 flex justify-end gap-3">
+                            {isSuperackito && (
+                                <button 
+                                    onClick={() => handleDeleteOrder(selectedOrder.id, selectedOrder.orderNumber)}
+                                    className="px-4 py-2 border border-red-200 text-red-600 rounded-lg hover:bg-red-50 flex items-center gap-2 mr-auto"
+                                >
+                                    <Trash2 size={18} /> Eliminar
+                                </button>
+                            )}
                             <button 
                                 onClick={() => {
                                     if(selectedOrder) printOrder(selectedOrder, getManagerName(selectedOrder.managerId));

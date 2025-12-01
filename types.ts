@@ -27,11 +27,19 @@ export enum ProcessStatus {
 }
 
 export enum EmployeeRole {
+    // System Roles
     DEVELOPER = 'Desarrollador',
     DIRECTOR = 'Director General',
     PRODUCTION_MANAGER = 'Jefe de Producción',
     QUALITY_MANAGER = 'Calidad',
-    ASSISTANT = 'Asistente de Director'
+    ASSISTANT = 'Asistente de Director',
+    
+    // Operational Roles (Floor Staff)
+    WELDER = 'Soldador',
+    PAINTER = 'Pintor',
+    OPERATOR = 'Operador General',
+    ASSEMBLER = 'Ensamblador',
+    WAREHOUSE = 'Almacenista'
 }
 
 // --- Interfaces ---

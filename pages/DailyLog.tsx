@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { saveDailyLog, getDailyLogs } from '../services/storageService';
+import { saveDailyLog, getDailyLogs, getCurrentUser, deleteDailyLog } from '../services/storageService';
 import { printDailyLog } from '../services/pdfService';
-import { DailyLog } from '../types';
-import { Save, Printer, FileText } from 'lucide-react';
+import { DailyLog, Employee } from '../types';
+import { Save, Printer, FileText, Trash2 } from 'lucide-react';
 
 const DailyLogPage = () => {
     const [logs, setLogs] = useState<DailyLog[]>([]);
     const [isCreating, setIsCreating] = useState(false);
+    const [currentUser, setCurrentUser] = useState<Employee | null>(null);
 
     // Form
     const [supervisor, setSupervisor] = useState('');
@@ -17,8 +18,15 @@ const DailyLogPage = () => {
     const [efficiency, setEfficiency] = useState(90);
 
     useEffect(() => {
-        setLogs(getDailyLogs());
+        loadData();
     }, []);
+
+    const loadData = () => {
+        setLogs(getDailyLogs());
+        setCurrentUser(getCurrentUser());
+    };
+
+    const isSuperackito = currentUser?.employeeNumber === 'Superackito';
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -35,9 +43,24 @@ const DailyLogPage = () => {
             efficiency
         };
         saveDailyLog(newLog);
-        setLogs(getDailyLogs());
+        loadData();
         setIsCreating(false);
+        resetForm();
     };
+
+    const resetForm = () => {
+        setSummary('');
+        setIncidents('');
+        setProdCount(0);
+        setEfficiency(90);
+    };
+
+    const handleDeleteLog = (id: string, date: string) => {
+        if(window.confirm(`¿Estás seguro de eliminar el reporte del día ${date}?`)) {
+            deleteDailyLog(id);
+            loadData();
+        }
+    }
 
     return (
         <div className="p-4 md:p-8 pb-24">
@@ -112,9 +135,20 @@ const DailyLogPage = () => {
                                     <p className="text-2xl font-bold text-blue-600">{log.efficiency}%</p>
                                     <p className="text-xs text-slate-400">Eficiencia</p>
                                 </div>
-                                <button onClick={() => printDailyLog(log)} className="text-slate-500 hover:text-blue-600 flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg transition-colors">
-                                    <Printer size={14} /> <span className="md:hidden lg:inline">PDF</span>
-                                </button>
+                                <div className="flex gap-2">
+                                    {isSuperackito && (
+                                        <button 
+                                            onClick={() => handleDeleteLog(log.id, log.date)}
+                                            className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors border border-transparent hover:border-red-100"
+                                            title="Eliminar Reporte"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
+                                    <button onClick={() => printDailyLog(log)} className="text-slate-500 hover:text-blue-600 flex items-center gap-1 text-sm border px-3 py-1.5 rounded-lg transition-colors">
+                                        <Printer size={14} /> <span className="md:hidden lg:inline">PDF</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     ))}

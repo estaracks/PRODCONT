@@ -37,6 +37,12 @@ export const saveOrder = (order: ProductionOrder) => {
     setData(KEYS.ORDERS, orders);
 };
 
+export const deleteOrder = (id: string) => {
+    const orders = getOrders();
+    const filtered = orders.filter(o => o.id !== id);
+    setData(KEYS.ORDERS, filtered);
+};
+
 export const createInitialOrder = (
     projectName: string,
     client: string, 
@@ -141,6 +147,12 @@ export const saveDailyLog = (log: DailyLog) => {
     const logs = getDailyLogs();
     logs.push(log);
     setData(KEYS.LOGS, logs);
+};
+
+export const deleteDailyLog = (id: string) => {
+    const logs = getDailyLogs();
+    const filtered = logs.filter(l => l.id !== id);
+    setData(KEYS.LOGS, filtered);
 };
 
 // --- Incidents ---
